@@ -4,11 +4,14 @@
 #
 # Run ON the ZimaOS host as root:
 #   curl -fsSL https://raw.githubusercontent.com/chicohaager/lintux-modkit/main/install.sh -o /tmp/lintux-install.sh
-#   sudo bash /tmp/lintux-install.sh              # install what is missing, update what is old
-#   sudo bash /tmp/lintux-install.sh --check      # only report: installed vs. latest
+#   sudo bash /tmp/lintux-install.sh                    # update the modules that are installed
+#   sudo bash /tmp/lintux-install.sh --install zbackup  # also install this one (cron, zbackup, zfw or all)
+#   sudo bash /tmp/lintux-install.sh --check            # only report: installed vs. latest
 #   sudo bash /tmp/lintux-install.sh --only cron,zbackup
-#   sudo bash /tmp/lintux-install.sh --force      # reinstall even when up to date
+#   sudo bash /tmp/lintux-install.sh --force            # reinstall even when up to date
 #
+# Without --install it never adds a module you do not have: not everyone
+# wants a firewall, and a firewall nobody asked for can lock people out.
 # For every module it asks the running daemon for its version (the health
 # route behind the ZimaOS gateway), asks GitHub for the latest release,
 # downloads the matching asset for this CPU, verifies the sha256 the release
@@ -18,18 +21,27 @@
 # module that is busy (zbackup with a running job) unless --force is given.
 set -u
 
-ONLY=""; CHECK=0; FORCE=0
+ONLY=""; ADD=""; CHECK=0; FORCE=0; NEXT=""
 for a in "$@"; do
 	case "$a" in
 		--check) CHECK=1 ;;
 		--force) FORCE=1 ;;
 		--only=*) ONLY="${a#--only=}" ;;
-		--only) ONLY="__next__" ;;
-		-h|--help) sed -n '2,20p' "$0"; exit 0 ;;
-		*) if [ "$ONLY" = "__next__" ]; then ONLY="$a"; else echo "unknown argument: $a" >&2; exit 2; fi ;;
+		--install=*) ADD="${a#--install=}" ;;
+		--only|--install) NEXT="$a" ;;
+		-h|--help) sed -n '2,22p' "$0"; exit 0 ;;
+		*) case "$NEXT" in
+			--only) ONLY="$a"; NEXT="" ;;
+			--install) ADD="$a"; NEXT="" ;;
+			*) echo "unknown argument: $a" >&2; exit 2 ;;
+		   esac ;;
 	esac
 done
-[ "$ONLY" = "__next__" ] && { echo "--only needs a list, e.g. --only cron,zbackup" >&2; exit 2; }
+[ -n "$NEXT" ] && { echo "$NEXT needs a list, e.g. $NEXT cron,zbackup (or all)" >&2; exit 2; }
+[ "$ADD" = "all" ] && ADD="zfw,cron,zbackup"
+for m in ${ADD//,/ } ${ONLY//,/ }; do
+	case "$m" in zfw|cron|zbackup) ;; *) echo "unknown module: $m (zfw, cron, zbackup)" >&2; exit 2 ;; esac
+done
 
 say()  { printf '[lintux] %s\n' "$*"; }
 warn() { printf '[lintux] WARNING: %s\n' "$*" >&2; }
@@ -151,6 +163,7 @@ install_zfw() { # TAG — tarball with its own install.sh
 
 # --- main ------------------------------------------------------------------
 wanted() { [ -z "$ONLY" ] || case ",$ONLY," in *",$1,"*) true ;; *) false ;; esac; }
+asked()  { case ",$ADD," in *",$1,"*) true ;; *) false ;; esac; }
 
 say "ZimaOS ${VERSION_ID:-?} · $ARCH · $( [ $CHECK = 1 ] && echo 'check only' || echo 'install/update' )"
 rc=0
@@ -174,6 +187,10 @@ for spec in "zfw:zfw" "cron:cron" "zbackup:zima-backup"; do
 	say "$name: $state · latest $latest"
 	if [ $CHECK = 1 ]; then continue; fi
 
+	if [ -z "$have" ] && ! is_present "$name" && ! asked "$name"; then
+		say "$name: not installed and not asked for — add it with:  $0 --install $name"
+		continue
+	fi
 	if [ "$have" = "$latest" ] && [ $FORCE = 0 ]; then
 		say "$name: up to date"
 		continue
