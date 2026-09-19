@@ -18,23 +18,29 @@ go test -race ./...
 
 Apache License 2.0.
 
-## Installing the modules — `install.sh`
+## Installing the modules
 
-One script installs or updates the whole stack on a ZimaOS host — ZFW
-Firewall, Cron and Sync & Backup — from their GitHub releases:
+Two ready-made installers, pick the one you want — each installs what is
+missing and updates what is old, nothing else, no switches needed:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/chicohaager/lintux-modkit/main/install.sh -o /tmp/lintux-install.sh
-sudo bash /tmp/lintux-install.sh                    # update the modules that are installed
-sudo bash /tmp/lintux-install.sh --install zbackup  # also install this one (cron, zbackup, zfw or all)
-sudo bash /tmp/lintux-install.sh --check            # report only: installed vs. latest
-sudo bash /tmp/lintux-install.sh --only cron,zbackup
-sudo bash /tmp/lintux-install.sh --force            # reinstall even when up to date
+# Cron + Sync & Backup, no firewall
+curl -fsSL https://raw.githubusercontent.com/chicohaager/lintux-modkit/main/install-without-firewall.sh -o /tmp/lintux-install.sh
+sudo bash /tmp/lintux-install.sh
+
+# ZFW Firewall + Cron + Sync & Backup
+curl -fsSL https://raw.githubusercontent.com/chicohaager/lintux-modkit/main/install-with-firewall.sh -o /tmp/lintux-install.sh
+sudo bash /tmp/lintux-install.sh
 ```
 
-Without `--install` it never adds a module you do not have — not everyone
-wants a firewall, and a firewall nobody asked for can lock people out; a
-missing module is reported with the switch that would add it.
+Run the same script again any time to update. `--check` only reports,
+`--force` reinstalls even when up to date.
+
+Both are generated from `install.sh` (`tools/gen-installers.sh`; CI fails
+when they are stale). `install.sh` itself is the flexible form: by default
+it updates whatever is installed and adds nothing; `--install zbackup`
+(or `cron`, `zfw`, `all`) adds a module, `--only cron,zbackup` restricts
+the run.
 
 For each module it reads the version the running daemon reports (health
 route behind the gateway, no login), the latest release tag from the GitHub
@@ -45,6 +51,7 @@ and keys under `/DATA/AppData/<module>` are kept). A zbackup with a running
 job is left alone unless `--force` is given. Exit code 0 when everything
 wanted is current, 1 when a module was skipped.
 
-Verified on ZimaOS 1.7.1 (amd64): `--check` on a current host, `--force` over
-all three modules, a default run that leaves a removed module alone, and
-`--install zbackup` bringing it back.
+Verified on ZimaOS 1.7.1 (amd64): both ready-made installers (the
+no-firewall one bringing back a removed Sync & Backup, the full one on a
+current host), `--check`, `--force` over all three modules, and `install.sh`
+leaving a removed module alone until `--install` names it.

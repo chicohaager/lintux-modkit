@@ -21,7 +21,14 @@
 # module that is busy (zbackup with a running job) unless --force is given.
 set -u
 
-ONLY=""; ADD=""; CHECK=0; FORCE=0; NEXT=""
+# STACK is empty in install.sh. tools/gen-installers.sh writes the two
+# ready-made variants from this file: install-with-firewall.sh (STACK=
+# zfw,cron,zbackup) and install-without-firewall.sh (STACK=cron,zbackup).
+# With a STACK the script installs those modules when missing and updates
+# them when old, and looks at nothing else — no switches needed.
+STACK=""
+
+ONLY="$STACK"; ADD="$STACK"; CHECK=0; FORCE=0; NEXT=""
 for a in "$@"; do
 	case "$a" in
 		--check) CHECK=1 ;;
@@ -165,7 +172,7 @@ install_zfw() { # TAG — tarball with its own install.sh
 wanted() { [ -z "$ONLY" ] || case ",$ONLY," in *",$1,"*) true ;; *) false ;; esac; }
 asked()  { case ",$ADD," in *",$1,"*) true ;; *) false ;; esac; }
 
-say "ZimaOS ${VERSION_ID:-?} · $ARCH · $( [ $CHECK = 1 ] && echo 'check only' || echo 'install/update' )"
+say "ZimaOS ${VERSION_ID:-?} · $ARCH · $( [ $CHECK = 1 ] && echo 'check only' || echo 'install/update' )${STACK:+ · stack: ${STACK//,/ }}"
 rc=0
 for spec in "zfw:zfw" "cron:cron" "zbackup:zima-backup"; do
 	name="${spec%%:*}"; repo="${spec#*:}"
