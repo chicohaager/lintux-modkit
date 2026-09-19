@@ -25,11 +25,16 @@ Firewall, Cron and Sync & Backup — from their GitHub releases:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/chicohaager/lintux-modkit/main/install.sh -o /tmp/lintux-install.sh
-sudo bash /tmp/lintux-install.sh            # install what is missing, update what is old
-sudo bash /tmp/lintux-install.sh --check    # report only: installed vs. latest
+sudo bash /tmp/lintux-install.sh                    # update the modules that are installed
+sudo bash /tmp/lintux-install.sh --install zbackup  # also install this one (cron, zbackup, zfw or all)
+sudo bash /tmp/lintux-install.sh --check            # report only: installed vs. latest
 sudo bash /tmp/lintux-install.sh --only cron,zbackup
-sudo bash /tmp/lintux-install.sh --force    # reinstall even when up to date
+sudo bash /tmp/lintux-install.sh --force            # reinstall even when up to date
 ```
+
+Without `--install` it never adds a module you do not have — not everyone
+wants a firewall, and a firewall nobody asked for can lock people out; a
+missing module is reported with the switch that would add it.
 
 For each module it reads the version the running daemon reports (health
 route behind the gateway, no login), the latest release tag from the GitHub
@@ -41,4 +46,5 @@ job is left alone unless `--force` is given. Exit code 0 when everything
 wanted is current, 1 when a module was skipped.
 
 Verified on ZimaOS 1.7.1 (amd64): `--check` on a current host, `--force` over
-all three modules, and a fresh install of a removed module.
+all three modules, a default run that leaves a removed module alone, and
+`--install zbackup` bringing it back.
