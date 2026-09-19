@@ -1,5 +1,6 @@
 #!/bin/bash
-# install.sh — install or update the Lintux modules on a ZimaOS host:
+# install-without-firewall.sh — generated from install.sh by tools/gen-installers.sh, do not edit.
+# Installs or updates these Lintux modules on a ZimaOS host: cron, zbackup.
 #   ZFW Firewall (zfw), Cron (cron), Sync & Backup (zbackup).
 #
 # Run ON the ZimaOS host as root:
@@ -26,7 +27,7 @@ set -u
 # zfw,cron,zbackup) and install-without-firewall.sh (STACK=cron,zbackup).
 # With a STACK the script installs those modules when missing and updates
 # them when old, and looks at nothing else — no switches needed.
-STACK=""
+STACK="cron,zbackup"
 
 ONLY="$STACK"; ADD="$STACK"; CHECK=0; FORCE=0; NEXT=""
 for a in "$@"; do
