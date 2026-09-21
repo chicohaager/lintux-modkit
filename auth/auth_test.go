@@ -37,11 +37,11 @@ func signES256(t *testing.T, key *ecdsa.PrivateKey, exp int64, iss string) strin
 }
 
 func coords(pub *ecdsa.PublicKey) (x, y []byte) {
-	x = make([]byte, 32)
-	y = make([]byte, 32)
-	pub.X.FillBytes(x)
-	pub.Y.FillBytes(y)
-	return x, y
+	point, err := pub.Bytes() // 0x04 || X || Y
+	if err != nil {
+		panic(err)
+	}
+	return point[1:33], point[33:65]
 }
 
 // jwksServer serves a JWKS containing pub as its only EC/P-256 key.
