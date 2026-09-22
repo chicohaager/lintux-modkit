@@ -246,3 +246,42 @@ func TestJWKSResolver(t *testing.T) {
 		t.Fatal("missing management.url must fail")
 	}
 }
+
+// The user service issues a new key when it restarts. A token signed with
+// the new key must pass although the verifier still caches the old set —
+// once the cache is older than the retry floor; a fresh cache is not
+// re-fetched for every foreign token.
+func TestVerifyRefreshesKeysOnRotation(t *testing.T) {
+	oldKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	newKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	current := &oldKey.PublicKey
+	fetches := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fetches++
+		x, y := coords(current)
+		body, _ := json.Marshal(map[string]interface{}{"keys": []map[string]string{{"kty": "EC", "crv": "P-256", "x": b64.EncodeToString(x), "y": b64.EncodeToString(y)}}})
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	v := NewVerifier(StaticURL(srv.URL))
+	if err := v.Verify(signES256(t, oldKey, time.Now().Add(time.Hour).Unix(), "zimaos")); err != nil {
+		t.Fatalf("old key: %v", err)
+	}
+	current = &newKey.PublicKey
+	newToken := signES256(t, newKey, time.Now().Add(time.Hour).Unix(), "zimaos")
+	if err := v.Verify(newToken); err == nil {
+		t.Fatal("a cache younger than the retry floor must not be refreshed for a foreign token")
+	}
+	v.mu.Lock()
+	v.fetched = time.Now().Add(-jwksRetryFloor - time.Second)
+	v.mu.Unlock()
+	if err := v.Verify(newToken); err != nil {
+		t.Fatalf("token from the rotated key rejected: %v", err)
+	}
+	if fetches != 2 {
+		t.Fatalf("fetches = %d, want 2 (initial + one refresh on mismatch)", fetches)
+	}
+	if err := v.Verify(signES256(t, oldKey, time.Now().Add(time.Hour).Unix(), "zimaos")); err == nil {
+		t.Fatal("the old key must be gone after the refresh")
+	}
+}
