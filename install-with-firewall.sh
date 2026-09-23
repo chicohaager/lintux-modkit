@@ -121,8 +121,26 @@ wait_version() {
 	return 1
 }
 
-# semver_lt A B — true when A < B (both like 1.2.3)
-semver_lt() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" = "$1" ]; }
+# semver_lt A B — true when A < B (like 1.2.3, 1.2.3-dev7, 1.2.3+build).
+# A pre-release is older than its release (0.3.0-dev7 < 0.3.0); sort -V
+# alone puts it after, and a box on a dev build never took the release.
+# Build metadata carries no order. Two pre-releases of the same version
+# count up naturally (dev7 < dev10), not by semver's ASCII rule.
+semver_lt() {
+	local a="${1%%+*}" b="${2%%+*}" ac bc ap bp first
+	ac="${a%%-*}" bc="${b%%-*}"
+	ap="${a#"$ac"}" bp="${b#"$bc"}"
+	if [ "$ac" != "$bc" ]; then
+		first="$(printf '%s\n%s\n' "$ac" "$bc" | sort -V)"
+		[ "${first%%$'\n'*}" = "$ac" ]
+		return
+	fi
+	[ "$ap" = "$bp" ] && return 1
+	[ -z "$ap" ] && return 1  # release vs. its pre-release
+	[ -z "$bp" ] && return 0  # pre-release vs. its release
+	first="$(printf '%s\n%s\n' "$ap" "$bp" | sort -V)"
+	[ "${first%%$'\n'*}" = "$ap" ]
+}
 
 # --- per-module installers ------------------------------------------------
 install_raw() { # NAME TAG  — cron and zbackup: <name>-<arch>.raw via zpkg

@@ -34,7 +34,9 @@ sudo bash /tmp/lintux-install.sh
 ```
 
 Run the same script again any time to update. `--check` only reports,
-`--force` reinstalls even when up to date.
+`--force` reinstalls even when up to date. A development build
+(`0.3.0-dev7`) counts as older than its release (`0.3.0`), so the release
+replaces it without `--force` (`tools/test-semver.sh`).
 
 Both are generated from `install.sh` (`tools/gen-installers.sh`; CI fails
 when they are stale). `install.sh` itself is the flexible form: by default

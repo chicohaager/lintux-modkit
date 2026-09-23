@@ -8,4 +8,6 @@ jobs:
       - name: generated installers match install.sh
         run: bash tools/gen-installers.sh && git diff --exit-code -- install-with-firewall.sh install-without-firewall.sh
       - name: shellcheck
-        run: shellcheck -x install.sh install-with-firewall.sh install-without-firewall.sh tools/gen-installers.sh
+        run: shellcheck -x install.sh install-with-firewall.sh install-without-firewall.sh tools/gen-installers.sh tools/test-semver.sh
+      - name: version comparison (semver_lt)
+        run: bash tools/test-semver.sh
