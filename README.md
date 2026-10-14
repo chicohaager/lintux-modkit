@@ -7,10 +7,28 @@ Shared Go packages for the Lintux modules for ZimaOS (ZFW, Cron, Sync & Backup):
 | `auth` | ZimaOS session-token verifier (ES256 against the platform JWKS, resolved through the gateway route table), HTTP middleware |
 | `notify` | Webhook (generic, n8n, Discord, Slack, Home Assistant, Uptime Kuma), e-mail and Telegram delivery |
 | `schedule` | 5-field cron validation and next-run computation with one shared alias table |
-| `watchdog` | Boot watchdog and binary-refresh units in `/etc/systemd/system` for sysext services |
+| `watchdog` | Boot watchdog and binary-refresh units in `/etc/systemd/system` for sysext services; `Uninstall` removes exactly those four units again |
 | `httpx` | JSON errors with stable codes, same-origin CSRF check, request logging, static UI fallback |
 
 Everything here was measured on ZimaOS 1.7.x; the comments carry the measurements.
+
+## sysext build kit (`sysext/`)
+
+One build and one lint for every module instead of a hand-written `build.sh` per repository.
+
+| Script | What |
+|---|---|
+| `sysext/build-sysext.sh <name> <rootfs> <amd64\|arm64> <out>` | Builds from a copy of `<rootfs>` (the source stays untouched), writes `extension-release.<name>` with `ID=_any` and `ARCHITECTURE` (`x86-64`/`arm64`), squashfs gzip, `-all-root`, reproducible via `SOURCE_DATE_EPOCH` (default: last commit). Emits `<name>-<arch>.raw` + `.sha256`, and for amd64 also `<name>.raw` — the name `zpkg` fetches from the latest release for a `repo` catalog entry (measured 2026-10-02: `zima_cron.raw` 404, `cron.raw` 200). Runs the lint first; an ERROR aborts the build. |
+| `sysext/lint-units.sh <rootfs> [installer.sh …]` | ERROR: a unit uses `/DATA` without `RequiresMountsFor=/DATA/…`; `StartLimitIntervalSec`/`StartLimitBurst` outside `[Unit]`; an installer runs `systemctl enable --now <x>.service` (an upgrade then keeps the old binary). WARN: `WantedBy=multi-user.target` inside a sysext (not started at boot — needs `watchdog`); `extension-release` without `ARCHITECTURE`. |
+| `sysext/uninstall-watchdog.sh <service>` | Shell counterpart of `watchdog.Uninstall` for uninstall scripts. |
+
+Run against the units and installers as they stood before 2026-10-02, the lint reports exactly the three faults found by hand that day (zfw-ui and zima-vm-extras without `RequiresMountsFor`, vm-extras installer with `enable --now`).
+
+Still required on ZimaOS 1.8.0-beta1: the boot watchdog. A sysext with `EXTENSION_RELOAD_MANAGER=1` and a shipped `multi-user.target.wants/` link was not started at boot either (measured with a reboot, 2026-10-02).
+
+```sh
+bash tools/test-sysext.sh   # 21 cases, each rule against a case that must fire and one that must not
+```
 
 ```sh
 go test -race ./...
