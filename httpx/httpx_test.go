@@ -62,7 +62,7 @@ func TestLoggingCapsBody(t *testing.T) {
 		if !Decode(w, r, &v) {
 			return
 		}
-		w.WriteHeader(200)
+		w.WriteHeader(http.StatusOK)
 	}))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(`{"k":"`+strings.Repeat("a", 50)+`"}`)))
@@ -76,7 +76,7 @@ func TestStaticServesUnderPrefixAndBlocksTraversal(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<h1>ui</h1>"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	h := Static("/modules/x/", dir, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(418) }))
+	h := Static("/modules/x/", dir, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) }))
 	get := func(p string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, p, nil))

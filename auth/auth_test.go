@@ -119,7 +119,7 @@ func TestVerifyMalformed(t *testing.T) {
 
 func TestMiddlewareRejectsMissingTokenWithJSON(t *testing.T) {
 	_, v := newKeyAndServer(t)
-	h := v.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) }))
+	h := v.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/cron/tasks", nil))
 	if rec.Code != http.StatusUnauthorized {
@@ -132,7 +132,7 @@ func TestMiddlewareRejectsMissingTokenWithJSON(t *testing.T) {
 }
 
 func TestDisabledVerifierPassesThrough(t *testing.T) {
-	h := Disabled().Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) }))
+	h := Disabled().Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/cron/tasks", nil))
 	if rec.Code != 200 {
@@ -148,7 +148,7 @@ func TestMiddlewareLogsRejection(t *testing.T) {
 	defer log.SetOutput(os.Stderr)
 
 	key, v := newKeyAndServer(t)
-	h := v.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) }))
+	h := v.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
 	req := httptest.NewRequest(http.MethodGet, "/cron/tasks", nil)
 	req.Header.Set("Authorization", "Bearer "+signES256(t, key, time.Now().Add(time.Hour).Unix(), "refresh"))
 	req.Header.Set("X-Forwarded-For", "192.0.2.7")
