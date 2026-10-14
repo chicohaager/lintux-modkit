@@ -60,3 +60,53 @@ func TestInstallRejectsMissingNames(t *testing.T) {
 		t.Fatal("expected an error without Service/Binary")
 	}
 }
+
+func TestUninstallRemovesExactlyItsUnits(t *testing.T) {
+	dir := t.TempDir()
+	var calls []string
+	opts := Options{Service: "cron", Binary: "/usr/bin/cron", UnitDir: dir,
+		Systemctl: func(args ...string) error { calls = append(calls, strings.Join(args, " ")); return nil }}
+	if err := Install(opts); err != nil {
+		t.Fatal(err)
+	}
+	// a neighbour that merely shares the prefix must survive
+	foreign := filepath.Join(dir, "cron-other.service")
+	if err := os.WriteFile(foreign, []byte("[Unit]\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	calls = nil
+	if err := Uninstall(opts); err != nil {
+		t.Fatal(err)
+	}
+	for name := range Units(opts) {
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Errorf("%s still present after Uninstall", name)
+		}
+	}
+	if _, err := os.Stat(foreign); err != nil {
+		t.Errorf("Uninstall removed a unit it did not write: %v", err)
+	}
+	want := []string{"disable --now cron-watchdog.timer", "disable --now cron-refresh.path", "daemon-reload"}
+	if strings.Join(calls, "|") != strings.Join(want, "|") {
+		t.Fatalf("systemctl calls = %v, want %v", calls, want)
+	}
+}
+
+func TestUninstallIsIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	var calls []string
+	opts := Options{Service: "zbackup", UnitDir: dir,
+		Systemctl: func(args ...string) error { calls = append(calls, strings.Join(args, " ")); return nil }}
+	if err := Uninstall(opts); err != nil {
+		t.Fatalf("uninstall without units: %v", err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("nothing installed, yet systemctl was called: %v", calls)
+	}
+}
+
+func TestUninstallRejectsMissingService(t *testing.T) {
+	if err := Uninstall(Options{UnitDir: t.TempDir()}); err == nil {
+		t.Fatal("expected an error without Service")
+	}
+}
