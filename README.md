@@ -80,7 +80,7 @@ tailscale` or `--only tailscale` — also when they are installed already: a
 Tailscale update restarts `tailscaled` (the tailnet drops for ~2 s), a mergerfs
 update swaps the image under a mounted pool. A plain run reports "update
 available" and leaves them; the two ready-made installers never look at them.
-`--force` overrides the other "left alone" cases, but does not name a module.
+`--force` overrides the other "left alone" cases, but does not name a module. Only the mergerfs update waits for a running `snapraid`; the other modules' `systemd-sysext refresh` under a running sync did no harm in a measurement on ZimaOS 1.8.0 (sync exit 0, `check` "Everything OK" — one sample).
 
 Tailscale is kept current without new module releases: the installer reads
 the newest stable version from `pkgs.tailscale.com` and has the module's
