@@ -411,6 +411,10 @@ for spec in "zfw:zfw" "cron:cron" "zbackup:zima-backup" \
 			rc=1; continue
 		fi
 	fi
+	# Only mergerfs waits for snapraid: its update swaps the scripts and units
+	# a sync runs from. A plain sysext refresh (any other module) under a
+	# running sync did no harm: sync rc 0, check "Everything OK" (measured
+	# 2026-10-17, ZimaOS 1.8.0, refresh 3 s into a 55 s sync — one sample).
 	if [ "$name" = mergerfs ] && [ $FORCE = 0 ] && pgrep -x snapraid >/dev/null 2>&1; then
 		warn "mergerfs: snapraid is running (sync or scrub) — not touched now, run again later (or --force)"
 		rc=1; continue
