@@ -242,6 +242,14 @@ install_raw() { # NAME TAG  — cron and zbackup: <name>-<arch>.raw via zpkg
 	fi
 	say "$name: zpkg install"
 	zpkg install "$WORK/$name.raw" 2>&1 | sed 's/^/[lintux]   /'
+	# zpkg merges without reloading systemd: afterwards every unit reported
+	# NeedDaemonReload=yes, from DATA.mount to other modules' services
+	# (measured 2026-10-17, ZimaOS 1.8.0; a plain systemd-sysext refresh
+	# left it at no). Reload so the next systemctl call sees the merged units.
+	systemctl daemon-reload || warn "$name: systemctl daemon-reload failed"
+	if [ "$(systemctl show -p NeedDaemonReload --value "$name.service" 2>/dev/null)" = yes ]; then
+		warn "$name: systemd still reports NeedDaemonReload=yes after the reload"
+	fi
 	if wait_version "$name" "$ver"; then
 		say "$name: $ver is running"
 	else
