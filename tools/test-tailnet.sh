@@ -11,7 +11,7 @@ src="$(sed -n '/^tailnet_ssh()/,/^}/p' install.sh)"
 eval "$src"
 
 SS_OUT=""
-# shellcheck disable=SC2317  # called from the eval'd tailnet_ssh
+# shellcheck disable=SC2317,SC2329  # called from the eval'd tailnet_ssh
 ss() { printf '%s\n' "$SS_OUT"; }
 
 fail=0 n=0

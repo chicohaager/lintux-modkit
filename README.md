@@ -61,7 +61,7 @@ when they are stale). `install.sh` itself is the flexible form: by default
 it updates whatever is installed and adds nothing; `--install zbackup`
 (or `cron`, `zfw`, `mergerfs`, `tailscale`, `all`) adds a module,
 `--only cron,zbackup` restricts the run. mergerfs + SnapRAID and Tailscale
-are in neither ready-made installer — they come only on `--install`.
+are in neither ready-made installer — they come, and update, only when named.
 
 For each module it reads the installed version, the latest release tag
 (from the `/releases/latest` redirect, which has no API quota; the GitHub
@@ -75,10 +75,13 @@ verifies the sha256 the release ships, and installs:
 | `mergerfs` | sha256 of `mergerfs-snapraid.raw` against the release's `SHA256SUMS` | its `install.sh` from the release's source archive (`pool.env`, `snapraid.conf` kept) | `snapraid` runs |
 | `tailscale` | `SYSEXT_VERSION_ID` in the merged extension-release (from module 1.0.4) | its `install.sh` from the source archive with `TAILSCALE_RAW=<release image>` (login state kept) | an SSH session comes in over the tailnet — the restart would cut it |
 
-`--force` overrides every "left alone". A mergerfs or Tailscale image whose
-version cannot be read (an own build, or Tailscale before 1.0.4) is replaced
-only on `--install <name>`. Tailscale runs last, since its restart drops the
-tailnet for ~2 s. Exit code 0 when everything wanted is current, 1 when a
+mergerfs and Tailscale change only when the run names them — `--install
+tailscale` or `--only tailscale` — also when they are installed already: a
+Tailscale update restarts `tailscaled` (the tailnet drops for ~2 s), a mergerfs
+update swaps the image under a mounted pool. A plain run reports "update
+available" and leaves them; the two ready-made installers never look at them.
+`--force` overrides the other "left alone" cases, but does not name a module.
+Tailscale runs last (`tools/test-decisions.sh`: 16 cases of what a run installs). Exit code 0 when everything wanted is current, 1 when a
 module was skipped.
 
 Verified on ZimaOS 1.7.1 (amd64): both ready-made installers (the

@@ -24,6 +24,8 @@
 # install.sh from the release's source archive (config and login state under
 # /DATA/AppData are kept). It never touches a module that is busy (zbackup with
 # a running job, a running snapraid) unless --force is given.
+# mergerfs and tailscale change only when named (--install or --only), also
+# when installed — an update restarts tailscaled or swaps the pool's image.
 set -u
 
 # STACK is empty in install.sh. tools/gen-installers.sh writes the two
@@ -41,7 +43,7 @@ for a in "$@"; do
 		--only=*) ONLY="${a#--only=}" ;;
 		--install=*) ADD="${a#--install=}" ;;
 		--only|--install) NEXT="$a" ;;
-		-h|--help) sed -n '2,27p' "$0"; exit 0 ;;
+		-h|--help) sed -n '2,29p' "$0"; exit 0 ;;
 		*) case "$NEXT" in
 			--only) ONLY="$a"; NEXT="" ;;
 			--install) ADD="$a"; NEXT="" ;;
@@ -292,6 +294,12 @@ install_tailscale() { # TAG — prebuilt image from the release, units and insta
 # --- main ------------------------------------------------------------------
 wanted() { [ -z "$ONLY" ] || case ",$ONLY," in *",$1,"*) true ;; *) false ;; esac; }
 asked()  { case ",$ADD," in *",$1,"*) true ;; *) false ;; esac; }
+# named NAME — this run names the module: --install NAME, or --only NAME
+named()  { asked "$1" || { [ -n "$ONLY" ] && [ "$ONLY" != "$STACK" ] && wanted "$1"; }; }
+# on_request NAME — installed or not, the module changes only when a run
+# names it: a Tailscale update restarts tailscaled (the tailnet drops), a
+# mergerfs update swaps the image under a mounted pool (decision 2026-10-17)
+on_request() { case "$1" in mergerfs|tailscale) true ;; *) false ;; esac; }
 
 say "ZimaOS ${VERSION_ID:-?} · $ARCH · $( [ $CHECK = 1 ] && echo 'check only' || echo 'install/update' )${STACK:+ · stack: ${STACK//,/ }}"
 rc=0
@@ -328,9 +336,15 @@ for spec in "zfw:zfw" "cron:cron" "zbackup:zima-backup" \
 		say "$name: up to date"
 		continue
 	fi
-	# An image we cannot place may be a newer own build — replaced only on request
-	if [ -z "$have" ] && version_by_file "$name" && ! asked "$name" && [ $FORCE = 0 ]; then
-		say "$name: left alone, its version is unknown — replace it with the release:  $0 --install $name"
+	# Installed, but changed only when named — --force alone does not count
+	if on_request "$name" && ! named "$name"; then
+		if [ -z "$have" ]; then
+			say "$name: left alone, its version is unknown — replace it with the release:  $0 --install $name"
+		elif semver_lt "$have" "$latest"; then
+			say "$name: update $have → $latest available, not applied unasked — apply it with:  $0 --install $name"
+		else
+			say "$name: left alone — name it to reinstall:  $0 --install $name --force"
+		fi
 		continue
 	fi
 	if [ -n "$have" ] && ! semver_lt "$have" "$latest" && [ $FORCE = 0 ]; then
