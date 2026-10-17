@@ -37,7 +37,9 @@ run() {
 		json_field() { echo 0; }
 		pgrep() { return 1; }
 		tailnet_ssh() { false; }
-		install_tailscale() { echo "INSTALL tailscale"; }
+		ts_installed() { [ -n "${TS_HAVE-1.0.0}" ] && echo "${TS_HAVE-1.0.0}"; }
+		ts_target()    { [ -n "${TS_WANT-1.0.0}" ] && echo "${TS_WANT-1.0.0}"; }
+		install_tailscale() { echo "INSTALL tailscale with ${2-}"; }
 		install_mergerfs()  { echo "INSTALL mergerfs"; }
 		install_zfw()       { echo "INSTALL zfw"; }
 		install_raw()       { echo "INSTALL $1"; }
@@ -80,6 +82,29 @@ out="$(HAVE_OTHER=1.0.0 run "" 2.0.0)"; n=$((n + 1))
 case "$out" in *"INSTALL zfw"*) ;; *) echo "FAIL: plain run left an old zfw alone" >&2; fail=1 ;; esac
 out="$(run "" 2.0.0)"; n=$((n + 1))
 [ -z "$out" ] || { echo "FAIL: up-to-date plain run installed: $out" >&2; fail=1; }
+
+# Tailscale itself behind upstream, module current (2.0.0 = release)
+expect_ts() { # WANT TS_HAVE TS_WANT ARGS…
+	local want="$1" th="$2" tw="$3" got=no out; shift 3
+	out="$(TS_HAVE="$th" TS_WANT="$tw" run "" 2.0.0 "$@")"
+	case "$out" in *"INSTALL tailscale with $tw"*) got=yes ;; *"INSTALL tailscale"*) got="yes-but:$out" ;; esac
+	n=$((n + 1))
+	if [ "$got" != "$want" ]; then
+		echo "FAIL: Tailscale $th → $tw args='$*' — want install=$want, got $got" >&2
+		fail=1
+	fi
+}
+expect_ts no  1.104.1 1.106.0                       # plain run: reported, not applied
+expect_ts no  1.104.1 1.106.0 --force
+expect_ts yes 1.104.1 1.106.0 --install=tailscale   # built with the newer Tailscale
+expect_ts yes 1.104.1 1.106.0 --only=tailscale
+expect_ts no  1.106.0 1.106.0 --install=tailscale   # current
+expect_ts no  1.106.0 1.104.1 --install=tailscale   # upstream older: no downgrade
+expect_ts no  1.104.1 ""      --install=tailscale   # upstream unknown: module decides
+expect_ts no  ""      1.106.0 --install=tailscale   # Tailscale version unreadable, module current
+# a pin (TAILSCALE_VERSION) wins in both directions
+out="$(TAILSCALE_VERSION=1.102.0 TS_HAVE=1.104.1 TS_WANT=1.102.0 run "" 2.0.0 --install=tailscale)"; n=$((n + 1))
+case "$out" in *"INSTALL tailscale with 1.102.0"*) ;; *) echo "FAIL: pin 1.102.0 not installed: $out" >&2; fail=1 ;; esac
 
 [ $fail = 0 ] && echo "decisions: $n cases ok"
 exit $fail

@@ -73,7 +73,7 @@ verifies the sha256 the release ships, and installs:
 | `zfw` | health route behind the gateway | its own `install.sh` (tarball) | — |
 | `cron`, `zbackup` | health route behind the gateway | `zpkg` (installed module removed first; data under `/DATA/AppData/<module>` kept) | zbackup: a job runs |
 | `mergerfs` | sha256 of `mergerfs-snapraid.raw` against the release's `SHA256SUMS` | its `install.sh` from the release's source archive (`pool.env`, `snapraid.conf` kept) | `snapraid` runs |
-| `tailscale` | `SYSEXT_VERSION_ID` in the merged extension-release (from module 1.0.4) | its `install.sh` from the source archive with `TAILSCALE_RAW=<release image>` (login state kept) | an SSH session comes in over the tailnet — the restart would cut it |
+| `tailscale` | module: `SYSEXT_VERSION_ID`, Tailscale: `TAILSCALE_VERSION` in the merged extension-release (from module 1.0.4; else `tailscale version`) | its `install.sh` from the source archive, building the image on the host with the newest stable Tailscale (login state kept) | an SSH session comes in over the tailnet — the restart would cut it |
 
 mergerfs and Tailscale change only when the run names them — `--install
 tailscale` or `--only tailscale` — also when they are installed already: a
@@ -81,6 +81,17 @@ Tailscale update restarts `tailscaled` (the tailnet drops for ~2 s), a mergerfs
 update swaps the image under a mounted pool. A plain run reports "update
 available" and leaves them; the two ready-made installers never look at them.
 `--force` overrides the other "left alone" cases, but does not name a module.
+
+Tailscale is kept current without new module releases: the installer reads
+the newest stable version from `pkgs.tailscale.com` and has the module's
+`build.sh` build the image on the host (`mksquashfs` ships with ZimaOS;
+`build.sh` checks the tarball against the sha256 Tailscale publishes). An
+installed Tailscale behind that version counts as an update — applied, like
+every Tailscale update, only when the run names it. `TAILSCALE_VERSION=x.y.z`
+pins a version. When the build cannot run (no `mksquashfs`, Tailscale
+unreachable, a failed build) it falls back to the image in the module release.
+A scheduled CI rebuild was the other way, and the weaker one: GitHub disables
+schedules in a public repository after 60 days without activity.
 Tailscale runs last (`tools/test-decisions.sh`: 16 cases of what a run installs). Exit code 0 when everything wanted is current, 1 when a
 module was skipped.
 
@@ -96,3 +107,9 @@ installed end-to-end from the release (login kept), then `up to date`; the
 snapraid guard against a running `snapraid`; the tailnet guard true over a
 tailnet SSH session and false over the LAN (`tools/test-tailnet.sh` for the
 address ranges).
+
+Verified on ZimaOS 1.8.0 (amd64), 2026-10-17, with the upstream build: a pin
+to Tailscale 1.102.3 built on the host, a plain run then only reported the
+update to 1.104.1, `--install tailscale` built 1.104.1, a pin to a version
+that does not exist fell back to the release image; login state, the mergerfs
+pool and 0 failed units after every step.

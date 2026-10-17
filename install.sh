@@ -24,6 +24,9 @@
 # install.sh from the release's source archive (config and login state under
 # /DATA/AppData are kept). It never touches a module that is busy (zbackup with
 # a running job, a running snapraid) unless --force is given.
+# Tailscale itself is built on the host from the newest stable release on
+# pkgs.tailscale.com (TAILSCALE_VERSION=x.y.z pins one); the module release's
+# prebuilt image is the fallback when that is not possible.
 # mergerfs and tailscale change only when named (--install or --only), also
 # when installed — an update restarts tailscaled or swaps the pool's image.
 set -u
@@ -43,7 +46,7 @@ for a in "$@"; do
 		--only=*) ONLY="${a#--only=}" ;;
 		--install=*) ADD="${a#--install=}" ;;
 		--only|--install) NEXT="$a" ;;
-		-h|--help) sed -n '2,29p' "$0"; exit 0 ;;
+		-h|--help) sed -n '2,32p' "$0"; exit 0 ;;
 		*) case "$NEXT" in
 			--only) ONLY="$a"; NEXT="" ;;
 			--install) ADD="$a"; NEXT="" ;;
@@ -148,6 +151,32 @@ is_present() { [ -f "/var/lib/extensions/$(raw_name "$1").raw" ]; }
 # version_by_file NAME — the version comes from the image, not from a daemon;
 # an image there with no readable version is a build we cannot place
 version_by_file() { case "$1" in mergerfs|tailscale) true ;; *) false ;; esac; }
+
+# ts_installed — the Tailscale version inside the merged image: the
+# TAILSCALE_VERSION key from module 1.0.4 on, else what the CLI reports
+ts_installed() {
+	local f=/usr/lib/extension-release.d/extension-release.tailscale v=""
+	[ -r "$f" ] && v="$(sed -n 's/^TAILSCALE_VERSION=//p' "$f" | head -n1)"
+	[ -n "$v" ] || v="$(/usr/bin/tailscale version 2>/dev/null | head -n1)"
+	case "$v" in [0-9]*.[0-9]*.[0-9]*) echo "$v" ;; *) return 1 ;; esac
+}
+
+# ts_target — the Tailscale version to install: TAILSCALE_VERSION from the
+# environment (a pin), else the newest stable release on pkgs.tailscale.com.
+# The module's own release ships an image too, but its Tailscale is frozen at
+# release time; building from upstream keeps Tailscale current without a new
+# module release (a scheduled CI rebuild would stop silently: GitHub disables
+# schedules in public repos after 60 days without activity).
+ts_target() {
+	local f="$WORK/tailscale-stable.json" v
+	if [ -n "${TAILSCALE_VERSION:-}" ]; then
+		v="$TAILSCALE_VERSION"
+	else
+		curl -fsSL -m 20 -o "$f" 'https://pkgs.tailscale.com/stable/?mode=json' 2>/dev/null || return 1
+		v="$(json_field "$f" TarballsVersion)"
+	fi
+	case "$v" in [0-9]*.[0-9]*.[0-9]*) echo "$v" ;; *) return 1 ;; esac
+}
 
 # tailnet_ssh — an SSH session reaches this host over the tailnet (CGNAT
 # 100.64.0.0/10 or Tailscale's fd7a:115c:a1e0::/48); restarting tailscaled
@@ -272,22 +301,36 @@ install_mergerfs() { # TAG — image from the release, scripts and units from it
 	fi
 }
 
-install_tailscale() { # TAG — prebuilt image from the release, units and installer from its source
-	local tag="$1" ver="${1#v}" base src asset
+install_tailscale() { # TAG TSVER — module from TAG; Tailscale TSVER built on this host
+	local tag="$1" ver="${1#v}" ts="${2:-}" base src asset built=0 rc
 	base="https://github.com/chicohaager/zimaos-tailscale-sysext/releases/download/$tag"
 	asset="tailscale-$ARCH.raw"
-	say "tailscale: downloading $asset ($tag)"
 	src="$(source_tree tailscale "$tag" zimaos-tailscale-sysext)" || exit 1
-	fetch "$base/$asset" "$WORK/$asset"
-	fetch "$base/$asset.sha256" "$WORK/$asset.sha256"
-	( cd "$WORK" && sha256sum -c "$asset.sha256" >/dev/null ) || die "tailscale: checksum mismatch"
-	say "tailscale: checksum OK"
-	say "tailscale: running the module's install.sh (login state under /DATA/AppData/tailscale is kept; the tailnet drops for ~2 s)"
-	( cd "$src" && TAILSCALE_RAW="$WORK/$asset" bash install.sh </dev/null ) 2>&1 | sed 's/^/[lintux]   /'
-	if [ "$(installed_version tailscale)" = "$ver" ] && systemctl is-active --quiet tailscaled.service; then
-		say "tailscale: $ver is running"
+	say "tailscale: login state under /DATA/AppData/tailscale is kept; the tailnet drops for ~2 s"
+	if [ -n "$ts" ] && command -v mksquashfs >/dev/null 2>&1; then
+		# build.sh fetches tailscale_<ts>_<arch>.tgz and checks it against the
+		# sha256 pkgs.tailscale.com publishes; nothing is deployed when it fails
+		say "tailscale: building module $ver with Tailscale $ts on this host"
+		( cd "$src" && TAILSCALE_VERSION="$ts" ARCH="$ARCH" bash install.sh </dev/null ) 2>&1 | sed 's/^/[lintux]   /'
+		rc=${PIPESTATUS[0]}
+		if [ "$rc" = 0 ]; then built=1; else warn "tailscale: build with Tailscale $ts failed (exit $rc) — falling back to the release image"; fi
 	else
-		die "tailscale: installed, but $ver is not merged or tailscaled is not active — check: systemctl status tailscaled"
+		warn "tailscale: ${ts:+no mksquashfs on this host}${ts:-newest Tailscale version unknown} — installing the release image"
+	fi
+	if [ $built = 0 ]; then
+		say "tailscale: downloading $asset ($tag)"
+		fetch "$base/$asset" "$WORK/$asset"
+		fetch "$base/$asset.sha256" "$WORK/$asset.sha256"
+		( cd "$WORK" && sha256sum -c "$asset.sha256" >/dev/null ) || die "tailscale: checksum mismatch"
+		say "tailscale: checksum OK"
+		( cd "$src" && TAILSCALE_RAW="$WORK/$asset" bash install.sh </dev/null ) 2>&1 | sed 's/^/[lintux]   /'
+		ts=""
+	fi
+	if [ "$(installed_version tailscale)" = "$ver" ] && systemctl is-active --quiet tailscaled.service \
+		&& { [ -z "$ts" ] || [ "$(ts_installed)" = "$ts" ]; }; then
+		say "tailscale: $ver with Tailscale $(ts_installed) is running"
+	else
+		die "tailscale: installed, but module $ver${ts:+ / Tailscale $ts} is not merged or tailscaled is not active — check: systemctl status tailscaled"
 	fi
 }
 
@@ -325,14 +368,24 @@ for spec in "zfw:zfw" "cron:cron" "zbackup:zima-backup" \
 	else
 		state="not installed"
 	fi
-	say "$name: $state · latest $latest"
+	ts_have="" ts_want="" ts_behind=0
+	if [ "$name" = tailscale ]; then
+		ts_have="$(ts_installed || true)"
+		ts_want="$(ts_target || true)"
+		[ -n "$have" ] && state="$state (Tailscale ${ts_have:-?})"
+		if [ -n "$ts_have" ] && [ -n "$ts_want" ] && semver_lt "$ts_have" "$ts_want"; then ts_behind=1; fi
+		if [ -n "${TAILSCALE_VERSION:-}" ] && [ -n "$ts_have" ] && [ "$ts_have" != "$ts_want" ]; then ts_behind=1; fi
+		say "$name: $state · latest $latest (Tailscale ${ts_want:-unknown})"
+	else
+		say "$name: $state · latest $latest"
+	fi
 	if [ $CHECK = 1 ]; then continue; fi
 
 	if [ -z "$have" ] && ! is_present "$name" && ! asked "$name"; then
 		say "$name: not installed and not asked for — add it with:  $0 --install $name"
 		continue
 	fi
-	if [ "$have" = "$latest" ] && [ $FORCE = 0 ]; then
+	if [ "$have" = "$latest" ] && [ $ts_behind = 0 ] && [ $FORCE = 0 ]; then
 		say "$name: up to date"
 		continue
 	fi
@@ -340,14 +393,14 @@ for spec in "zfw:zfw" "cron:cron" "zbackup:zima-backup" \
 	if on_request "$name" && ! named "$name"; then
 		if [ -z "$have" ]; then
 			say "$name: left alone, its version is unknown — replace it with the release:  $0 --install $name"
-		elif semver_lt "$have" "$latest"; then
-			say "$name: update $have → $latest available, not applied unasked — apply it with:  $0 --install $name"
+		elif semver_lt "$have" "$latest" || [ $ts_behind = 1 ]; then
+			say "$name: update $have${ts_have:+ (Tailscale $ts_have)} → $latest${ts_want:+ (Tailscale $ts_want)} available, not applied unasked — apply it with:  $0 --install $name"
 		else
 			say "$name: left alone — name it to reinstall:  $0 --install $name --force"
 		fi
 		continue
 	fi
-	if [ -n "$have" ] && ! semver_lt "$have" "$latest" && [ $FORCE = 0 ]; then
+	if [ -n "$have" ] && [ "$have" != "$latest" ] && ! semver_lt "$have" "$latest" && [ $FORCE = 0 ]; then
 		say "$name: installed $have is newer than the release $latest — left alone (use --force to replace)"
 		continue
 	fi
@@ -371,7 +424,7 @@ for spec in "zfw:zfw" "cron:cron" "zbackup:zima-backup" \
 		cron)      install_raw cron "$tag" cron ;;
 		zbackup)   install_raw zbackup "$tag" zima-backup ;;
 		mergerfs)  install_mergerfs "$tag" ;;
-		tailscale) install_tailscale "$tag" ;;
+		tailscale) install_tailscale "$tag" "$ts_want" ;;
 	esac
 done
 [ $CHECK = 1 ] && say "nothing changed (--check)"
