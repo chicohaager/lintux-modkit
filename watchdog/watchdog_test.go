@@ -110,3 +110,34 @@ func TestUninstallRejectsMissingService(t *testing.T) {
 		t.Fatal("expected an error without Service")
 	}
 }
+
+func TestSystemctlRunsTheOneInPathWithItsArguments(t *testing.T) {
+	dir := t.TempDir()
+	record := filepath.Join(dir, "args")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + record + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "systemctl"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	if err := systemctl("enable", "--now", "x-watchdog.timer"); err != nil {
+		t.Fatalf("systemctl: %v", err)
+	}
+	got, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatalf("fake systemctl was not run: %v", err)
+	}
+	if want := "enable\n--now\nx-watchdog.timer\n"; string(got) != want {
+		t.Errorf("arguments = %q, want %q", got, want)
+	}
+}
+
+func TestSystemctlReportsAFailedCall(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "systemctl"), []byte("#!/bin/sh\nexit 3\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	if err := systemctl("daemon-reload"); err == nil {
+		t.Error("exit 3 reported as success")
+	}
+}
