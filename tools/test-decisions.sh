@@ -11,7 +11,9 @@ cd "$(dirname "$0")/.." || exit 1
 
 main="$(sed -n '/^# --- main/,$p' install.sh)"
 semver="$(sed -n '/^semver_lt()/,/^}/p' install.sh)"
-[ -n "$main" ] && [ -n "$semver" ] || { echo "main or semver_lt not found in install.sh" >&2; exit 1; }
+if [ -z "$main" ] || [ -z "$semver" ]; then
+	echo "main or semver_lt not found in install.sh" >&2; exit 1
+fi
 
 # run STACK HAVE_TAILSCALE ARGS… — prints the INSTALL lines of one run
 run() {
