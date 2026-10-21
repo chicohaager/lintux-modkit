@@ -43,6 +43,20 @@ mkroot "$T/good" "$GOOD"
 expect "saubere Unit: kein ERROR" 0 "" "$T/good"
 expect "saubere Unit: Boot-Race-Hinweis kommt als WARN" 0 "WARN demo.service: startet beim Boot nicht" "$T/good"
 
+absent() {  # <name> <muster> <args...>: Lint laeuft durch und die Meldung fehlt
+  local name="$1" pat="$2"; shift 2
+  local out
+  out=$(sh "$LINT" "$@" 2>&1) || { bad "$name (exit $?): $out"; return; }
+  if printf '%s' "$out" | grep -q "$pat"; then bad "$name (Meldung da: $pat): $out"; return; fi
+  ok "$name"
+}
+mkroot "$T/wd" "$GOOD"
+printf '#!/bin/sh\n# github.com/chicohaager/lintux-modkit/watchdog.Install\n' > "$T/wd/usr/bin/demo"
+absent "L5 Binary installiert den Watchdog selbst -> kein WARN" "startet beim Boot nicht" "$T/wd"
+mkroot "$T/wd2" "${GOOD/ExecStart=\/usr\/bin\/demo/ExecStart=-/usr/bin/demo --serve}"
+cp "$T/wd/usr/bin/demo" "$T/wd2/usr/bin/demo"
+absent "L5 ExecStart mit Praefix und Argument -> Binary gefunden" "startet beim Boot nicht" "$T/wd2"
+
 mkroot "$T/nomount" "${GOOD/RequiresMountsFor=\/DATA\/AppData\/demo
 /}"
 expect "L1 /DATA ohne RequiresMountsFor -> ERROR" 1 "kein RequiresMountsFor" "$T/nomount"
@@ -70,29 +84,36 @@ if SOURCE_DATE_EPOCH=1700000000 sh "$BUILD" demo "$T/good" amd64 "$T/out1" >/dev
    && SOURCE_DATE_EPOCH=1700000000 sh "$BUILD" demo "$T/good" amd64 "$T/out2" >/dev/null 2>&1; then
   ok "Build amd64 laeuft"
   for f in demo-amd64.raw demo-amd64.raw.sha256 demo.raw demo.raw.sha256; do
-    [ -f "$T/out1/$f" ] && ok "Asset $f vorhanden" || bad "Asset $f fehlt"
+    if [ -f "$T/out1/$f" ]; then ok "Asset $f vorhanden"; else bad "Asset $f fehlt"; fi
   done
-  cmp -s "$T/out1/demo-amd64.raw" "$T/out2/demo-amd64.raw" && ok "Build ist reproduzierbar (byte-gleich)" || bad "zwei Builds unterscheiden sich"
+  if cmp -s "$T/out1/demo-amd64.raw" "$T/out2/demo-amd64.raw"; then ok "Build ist reproduzierbar (byte-gleich)"; else bad "zwei Builds unterscheiden sich"; fi
   rel=$(unsquashfs -cat "$T/out1/demo-amd64.raw" usr/lib/extension-release.d/extension-release.demo 2>/dev/null)
-  [ "$rel" = "$(printf 'ID=_any\nARCHITECTURE=x86-64')" ] && ok "extension-release im Image: ID=_any + ARCHITECTURE=x86-64" || bad "extension-release falsch: $rel"
-  ( cd "$T/out1" && sha256sum -c --quiet demo.raw.sha256 ) && ok "sha256 des Plain-Namens stimmt" || bad "sha256 demo.raw stimmt nicht"
-  [ ! -e "$T/good/usr/lib/extension-release.d" ] && ok "Quelle unangetastet" || bad "Build hat die Quelle veraendert"
+  if [ "$rel" = "$(printf 'ID=_any\nARCHITECTURE=x86-64')" ]; then ok "extension-release im Image: ID=_any + ARCHITECTURE=x86-64"; else bad "extension-release falsch: $rel"; fi
+  if ( cd "$T/out1" && sha256sum -c --quiet demo.raw.sha256 ); then ok "sha256 des Plain-Namens stimmt"; else bad "sha256 demo.raw stimmt nicht"; fi
+  if [ ! -e "$T/good/usr/lib/extension-release.d" ]; then ok "Quelle unangetastet"; else bad "Build hat die Quelle veraendert"; fi
 else
   bad "Build amd64 scheiterte"
 fi
 if SOURCE_DATE_EPOCH=1700000000 sh "$BUILD" demo "$T/good" arm64 "$T/out3" >/dev/null 2>&1; then
-  [ ! -e "$T/out3/demo.raw" ] && ok "arm64: kein Plain-Name (der gehoert amd64)" || bad "arm64 hat demo.raw erzeugt"
+  if [ ! -e "$T/out3/demo.raw" ]; then ok "arm64: kein Plain-Name (der gehoert amd64)"; else bad "arm64 hat demo.raw erzeugt"; fi
   rel=$(unsquashfs -cat "$T/out3/demo-arm64.raw" usr/lib/extension-release.d/extension-release.demo 2>/dev/null)
-  printf '%s' "$rel" | grep -q '^ARCHITECTURE=arm64$' && ok "arm64: ARCHITECTURE=arm64" || bad "arm64-Release falsch: $rel"
+  if printf '%s' "$rel" | grep -q '^ARCHITECTURE=arm64$'; then ok "arm64: ARCHITECTURE=arm64"; else bad "arm64-Release falsch: $rel"; fi
 else
   bad "Build arm64 scheiterte"
 fi
 if SOURCE_DATE_EPOCH=1 sh "$BUILD" demo "$T/nomount" amd64 "$T/out4" >/dev/null 2>&1; then
   bad "Build mit Lint-ERROR lief durch"
 else
-  [ ! -e "$T/out4/demo-amd64.raw" ] && ok "Lint-ERROR bricht den Build ab, kein Image" || bad "Lint-ERROR, aber Image erzeugt"
+  if [ ! -e "$T/out4/demo-amd64.raw" ]; then ok "Lint-ERROR bricht den Build ab, kein Image"; else bad "Lint-ERROR, aber Image erzeugt"; fi
 fi
-sh "$BUILD" 'Demo!' "$T/good" amd64 "$T/out5" >/dev/null 2>&1 && bad "ungueltiger Name angenommen" || ok "ungueltiger Name abgelehnt"
+if sh "$BUILD" 'Demo!' "$T/good" amd64 "$T/out5" >/dev/null 2>&1; then bad "ungueltiger Name angenommen"; else ok "ungueltiger Name abgelehnt"; fi
+if SOURCE_DATE_EPOCH=1700000000 sh "$BUILD" demo "$T/good" amd64 "$T/out6" v1.2.3-dev4 >/dev/null 2>&1; then
+  rel=$(unsquashfs -cat "$T/out6/demo-amd64.raw" usr/lib/extension-release.d/extension-release.demo 2>/dev/null)
+  if [ "$rel" = "$(printf 'ID=_any\nARCHITECTURE=x86-64\nSYSEXT_VERSION_ID=1.2.3-dev4')" ]; then ok "Version: SYSEXT_VERSION_ID ohne fuehrendes v"; else bad "Version falsch im Release: $rel"; fi
+else
+  bad "Build mit Version scheiterte"
+fi
+if sh "$BUILD" demo "$T/good" amd64 "$T/out7" '1.0;rm' >/dev/null 2>&1; then bad "ungueltige Version angenommen"; else ok "ungueltige Version abgelehnt"; fi
 
 echo "---- $pass ok, $fail FAIL"
 [ "$fail" -eq 0 ]

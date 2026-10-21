@@ -1,7 +1,7 @@
 #!/bin/sh
 # Ein sysext-Image fuer ZimaOS bauen - fuer alle Module gleich.
 #
-#   sh build-sysext.sh <name> <rootfs-dir> <amd64|arm64> <out-dir>
+#   sh build-sysext.sh <name> <rootfs-dir> <amd64|arm64> <out-dir> [version]
 #
 # Ergebnis in <out-dir>:
 #   <name>-<arch>.raw (+ .sha256)   immer
@@ -13,15 +13,20 @@
 #
 # Eigenschaften:
 #   - Die Quelle bleibt unangetastet: gebaut wird aus einer Kopie (extension-release je Arch).
-#   - extension-release: ID=_any (updatefest, §18.4) + ARCHITECTURE (x86-64 / arm64, §7.4).
+#   - extension-release: ID=_any (updatefest, §18.4) + ARCHITECTURE (x86-64 / arm64, §7.4)
+#     + SYSEXT_VERSION_ID, wenn [version] angegeben ist (os-release(5)); ein fuehrendes "v"
+#     faellt weg. Daran liest der Module Manager die installierte Version ab, auch bei
+#     Modulen ohne Health-Route.
 #   - squashfs gzip (§18.3: Kernel 6.12 ohne xz/zstd), -all-root, reproduzierbar ueber
 #     SOURCE_DATE_EPOCH (Standard: letzter git-Commit, sonst 0).
 #   - Vor dem Packen laeuft lint-units.sh; ein ERROR bricht den Build ab.
 set -eu
 NAME="${1:?name}"; SRC="${2:?rootfs-dir}"; ARCH="${3:?amd64|arm64}"; OUT="${4:?out-dir}"
+VERSION="${5:-}"; VERSION="${VERSION#v}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
 case "$NAME" in *[!a-z0-9_-]*|"") echo "ungueltiger Name: $NAME" >&2; exit 2 ;; esac
+case "$VERSION" in *[!0-9A-Za-z.+-]*) echo "ungueltige Version: $VERSION" >&2; exit 2 ;; esac
 case "$ARCH" in
   amd64) SYSARCH=x86-64 ;;
   arm64) SYSARCH=arm64 ;;
@@ -40,6 +45,7 @@ cp -a "$SRC/." "$STAGE/"
 mkdir -p "$STAGE/usr/lib/extension-release.d"
 rm -f "$STAGE"/usr/lib/extension-release.d/extension-release.*
 printf 'ID=_any\nARCHITECTURE=%s\n' "$SYSARCH" > "$STAGE/usr/lib/extension-release.d/extension-release.$NAME"
+[ -z "$VERSION" ] || printf 'SYSEXT_VERSION_ID=%s\n' "$VERSION" >> "$STAGE/usr/lib/extension-release.d/extension-release.$NAME"
 
 sh "$HERE/lint-units.sh" "$STAGE"
 
@@ -56,4 +62,4 @@ if [ "$ARCH" = amd64 ]; then
   cp -f "$RAW" "$OUT/$NAME.raw"
   ( cd "$OUT" && sha256sum "$NAME.raw" > "$NAME.raw.sha256" )
 fi
-echo "gebaut: $RAW ($(wc -c < "$RAW") Bytes, SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH, ARCHITECTURE=$SYSARCH)"
+echo "gebaut: $RAW ($(wc -c < "$RAW") Bytes, SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH, ARCHITECTURE=$SYSARCH${VERSION:+, SYSEXT_VERSION_ID=$VERSION})"
