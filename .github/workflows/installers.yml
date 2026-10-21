@@ -17,10 +17,14 @@ jobs:
           sudo install -m 0755 /tmp/shellcheck-v0.11.0/shellcheck /usr/local/bin/shellcheck
           shellcheck --version
       - name: shellcheck
-        run: shellcheck -x install.sh install-with-firewall.sh install-without-firewall.sh tools/gen-installers.sh tools/test-semver.sh tools/test-tailnet.sh tools/test-decisions.sh
+        run: shellcheck -x install.sh install-with-firewall.sh install-without-firewall.sh tools/gen-installers.sh tools/test-semver.sh tools/test-tailnet.sh tools/test-decisions.sh tools/test-sysext.sh sysext/build-sysext.sh sysext/lint-units.sh sysext/uninstall-watchdog.sh
       - name: version comparison (semver_lt)
         run: bash tools/test-semver.sh
       - name: tailnet SSH guard (tailnet_ssh)
         run: bash tools/test-tailnet.sh
       - name: what a run installs (decisions)
         run: bash tools/test-decisions.sh
+      - name: sysext lint and build (build-sysext.sh, lint-units.sh)
+        run: |
+          sudo apt-get update && sudo apt-get install -y squashfs-tools
+          bash tools/test-sysext.sh

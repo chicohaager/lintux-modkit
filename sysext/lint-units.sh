@@ -36,14 +36,24 @@ for u in "$ROOT"/usr/lib/systemd/system/*.service; do
     fi
   done
   # L5 (§18.9): WantedBy=multi-user.target in einer sysext startet beim Boot NICHT von selbst.
+  # Kein WARN, wenn das Binary aus ExecStart watchdog.Install enthaelt: es legt die Units selbst
+  # an. Das Paketsymbol uebersteht -s -w (gemessen an cron, zbackupd, modmanager, 21.10.2026).
   if grep -qE '^WantedBy=.*multi-user\.target' "$u"; then
-    warn "$n" "startet beim Boot nicht von selbst (sysext-Race, §18.9) - Watchdog aus lintux-modkit/watchdog noetig"
+    bin=$(sed -n 's/^ExecStart=[-@+!:]*\([^ ]*\).*/\1/p' "$u" | head -n 1)
+    if [ -n "$bin" ] && [ -f "$ROOT$bin" ] && grep -aq 'lintux-modkit/watchdog\.Install' "$ROOT$bin"; then
+      :
+    else
+      warn "$n" "startet beim Boot nicht von selbst (sysext-Race, §18.9) - Watchdog aus lintux-modkit/watchdog noetig"
+    fi
   fi
 done
 [ "$found_units" -gt 0 ] || warn "$ROOT" "keine .service-Unit unter usr/lib/systemd/system"
 
 # L4 (§7.4): ARCHITECTURE fehlt -> eine falsche Architektur scheitert erst beim Ausfuehren statt beim Merge.
-rel=$(ls "$ROOT"/usr/lib/extension-release.d/extension-release.* 2>/dev/null | head -1)
+rel=""
+for f in "$ROOT"/usr/lib/extension-release.d/extension-release.*; do
+  if [ -f "$f" ]; then rel="$f"; break; fi
+done
 if [ -z "$rel" ]; then
   warn "$ROOT" "kein extension-release (build-sysext.sh schreibt ihn)"
 elif ! grep -q '^ARCHITECTURE=' "$rel"; then
