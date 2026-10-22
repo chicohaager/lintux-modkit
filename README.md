@@ -34,7 +34,7 @@ bash tools/test-sysext.sh   # 21 cases, each rule against a case that must fire 
 go test -race ./...
 ```
 
-Apache License 2.0.
+MIT License, see [LICENSE](LICENSE).
 
 ## Installing the modules
 
