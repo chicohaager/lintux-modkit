@@ -30,3 +30,14 @@ jobs:
           bash tools/test-sysext.sh
       - name: sysext unit watchdog (unit-watchdog.sh)
         run: bash tools/test-unit-watchdog.sh
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: go vet
+        run: go vet ./...
+      - name: go test (auth, gateway, httpx, watchdog, webmod, …)
+        run: go test -race -count=1 ./...
