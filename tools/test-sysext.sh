@@ -115,5 +115,13 @@ else
 fi
 if sh "$BUILD" demo "$T/good" amd64 "$T/out7" '1.0;rm' >/dev/null 2>&1; then bad "ungueltige Version angenommen"; else ok "ungueltige Version abgelehnt"; fi
 
+# Modul-JSON: ohne sie warnt der Build (zpkg meldet sonst rc=1), mit ihr nicht
+out=$(SOURCE_DATE_EPOCH=1 sh "$BUILD" demo "$T/good" amd64 "$T/out8" 2>&1)
+case "$out" in *"WARN demo: keine usr/share/casaos/modules/demo.json"*) ok "ohne Modul-JSON: WARN" ;; *) bad "ohne Modul-JSON keine WARN: $out" ;; esac
+cp -a "$T/good" "$T/withjson"; mkdir -p "$T/withjson/usr/share/casaos/modules"
+printf '{"name": "demo"}\n' > "$T/withjson/usr/share/casaos/modules/demo.json"
+out=$(SOURCE_DATE_EPOCH=1 sh "$BUILD" demo "$T/withjson" amd64 "$T/out9" 2>&1)
+case "$out" in *"modules/demo.json"*) bad "WARN trotz Modul-JSON: $out" ;; *) ok "mit Modul-JSON: keine WARN" ;; esac
+
 echo "---- $pass ok, $fail FAIL"
 [ "$fail" -eq 0 ]
