@@ -48,6 +48,11 @@ printf 'ID=_any\nARCHITECTURE=%s\n' "$SYSARCH" > "$STAGE/usr/lib/extension-relea
 [ -z "$VERSION" ] || printf 'SYSEXT_VERSION_ID=%s\n' "$VERSION" >> "$STAGE/usr/lib/extension-release.d/extension-release.$NAME"
 
 sh "$HERE/lint-units.sh" "$STAGE"
+# zpkg zaehlt ein Modul nur mit usr/share/casaos/modules/<name>.json als installiert; ohne sie bindet
+# `zpkg install` das Image ein, meldet aber "module not installed" mit rc=1 (gemessen 1.8.0, 2026-10-23,
+# KB §7.4.1). Minimal reicht {"name": "<name>"} wie bei IceWhales doconverter.
+[ -f "$STAGE/usr/share/casaos/modules/$NAME.json" ] \
+  || echo "WARN $NAME: keine usr/share/casaos/modules/$NAME.json - zpkg install meldet dann rc=1 'module not installed'"
 
 umask 022
 find "$STAGE" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
