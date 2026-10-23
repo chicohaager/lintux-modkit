@@ -5,7 +5,7 @@
 //   api(path, {method, body})  JSON call with the ZimaOS session token; a 401 goes
 //                              through POST /v1/users/refresh once
 //   esc(s), $(sel), setStatus(msg, kind), describe(err), initTheme(key)
-//   zfw.present() / zfw.allowsUdp(port) / zfw.openUdp(port, name, notes)
+//   zfw.present() / zfw.allowsUdp(port) / zfw.openUdp(port, name, notes) / zfw.closeUdp(port)
 //                              ZFW firewall, called from the browser: same origin and
 //                              the user's own token satisfy ZFW's auth and CSRF checks
 
@@ -128,5 +128,18 @@ const zfw = {
     // commit below fail, an unsafe apply leaves the old rules plus this allow live.
     await api(`${ZFW}/apply`, { method: 'POST', body: { safe: false } });
     await api(`${ZFW}/commit`, { method: 'POST', body: {} });
+  },
+  // Removes only the rule openUdp added for this port (id mod-udp-<port>); a rule the user
+  // made by hand for the same port stays. Returns false when there was nothing to remove.
+  async closeUdp(port) {
+    const rs = await api(`${ZFW}/rules`);
+    const id = `mod-udp-${port}`.slice(0, 16);
+    const before = (rs.rules || []).length;
+    rs.rules = (rs.rules || []).filter((r) => r.id !== id);
+    if (rs.rules.length === before) return false;
+    await api(`${ZFW}/rules`, { method: 'POST', body: rs });
+    await api(`${ZFW}/apply`, { method: 'POST', body: { safe: false } });
+    await api(`${ZFW}/commit`, { method: 'POST', body: {} });
+    return true;
   },
 };
