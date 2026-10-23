@@ -32,6 +32,10 @@ for p in "$@"; do case "$p" in /*) ;; *) echo "kein absoluter Pfad: $p" >&2; exi
 # spaeterer Bau nicht still eine andere Basis nimmt. Neuer Stand: Digest bewusst anheben.
 IMAGE="${DEBIAN_IMAGE:-debian:trixie@sha256:4c25275446ca371766b8b093c696782eabce06263fccacb8d5d813b3dc44b308}"
 GLIBC_MAX="${GLIBC_MAX:-2.41}"
+# Pakete aus dem Debian-Schnappschuss vom Stand des Images (steht in dessen debian.sources), nicht
+# vom laufenden Spiegel: sonst holt ein spaeterer Bau andere Paketversionen und das Abbild weicht ab
+# (gemessen 2026-10-23: zwei Bauten am selben Tag gleich, aber apt-get update gegen deb.debian.org).
+DEBIAN_SNAPSHOT="${DEBIAN_SNAPSHOT:-20261020T213255Z}"
 
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
@@ -39,14 +43,17 @@ OUT=$(cd "$OUT" && pwd)
 INNER=$(sed -n '/^#--- im Container ---$/,$p' "$0")
 
 docker run --rm --platform "linux/$ARCH" \
-  -e NAME="$NAME" -e PKGS="$PKGS" -e GLIBC_MAX="$GLIBC_MAX" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+  -e NAME="$NAME" -e PKGS="$PKGS" -e GLIBC_MAX="$GLIBC_MAX" -e DEBIAN_SNAPSHOT="$DEBIAN_SNAPSHOT" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
   -v "$OUT:/out" "$IMAGE" sh -c "$INNER" sh "$@"
 exit 0
 
 #--- im Container ---
 set -eu
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq >/dev/null
+S=/etc/apt/sources.list.d/debian.sources
+sed -i -E "s#^URIs: http://deb\.debian\.org/(debian(-security)?)\$#URIs: http://snapshot.debian.org/archive/\\1/$DEBIAN_SNAPSHOT#" "$S"
+[ "$(grep -c "^URIs: http://snapshot.debian.org/archive/.*/$DEBIAN_SNAPSHOT\$" "$S")" -eq 2 ] || { echo "Schnappschuss nicht eingetragen: $S" >&2; cat "$S" >&2; exit 1; }
+apt-get -o Acquire::Check-Valid-Until=false update -qq >/dev/null
 # shellcheck disable=SC2086
 apt-get install -y -qq --no-install-recommends binutils patchelf file $PKGS >/dev/null
 L=/out/usr/lib/$NAME
