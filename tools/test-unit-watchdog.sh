@@ -56,5 +56,13 @@ for args in "enable nebula" "enable a;b.service" "enable x.service 1s" "enable .
 done
 t "ungueltige Aufrufe schreiben nichts" test "$(count)" -eq "$before"
 
+# status braucht kein root (Lesen); enable ohne root wird abgelehnt - Pruefung nur ausserhalb des Test-Verzeichnisses
+if [ "$(id -u)" -ne 0 ]; then
+  out=$(WATCHDOG_SYSTEMCTL="$T/systemctl" sh "$W" status nebula.service 2>&1); rc=$?
+  t "status ohne root (rc $rc: $out)" test "$rc" -eq 0
+  WATCHDOG_SYSTEMCTL="$T/systemctl" sh "$W" enable nebula.service >/dev/null 2>&1; rc=$?
+  t "enable ohne root abgelehnt (rc $rc)" test "$rc" -eq 1
+fi
+
 echo "unit-watchdog: $pass ok, $fail FAIL"
 [ "$fail" -eq 0 ]
