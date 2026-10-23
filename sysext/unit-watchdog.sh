@@ -29,7 +29,7 @@ case "$DELAY" in *[!0-9]*|"") echo "ungueltige Verzoegerung: $DELAY" >&2; exit 2
 BASE=$(printf '%s' "${UNIT%.service}" | tr '@' '-')
 D="${WATCHDOG_UNIT_DIR:-/etc/systemd/system}"
 SC="${WATCHDOG_SYSTEMCTL:-systemctl}"
-if [ -z "${WATCHDOG_UNIT_DIR:-}" ] && [ "$(id -u)" -ne 0 ]; then echo "braucht root" >&2; exit 1; fi
+if [ "$CMD" != status ] && [ -z "${WATCHDOG_UNIT_DIR:-}" ] && [ "$(id -u)" -ne 0 ]; then echo "braucht root" >&2; exit 1; fi
 
 case "$CMD" in
 enable)
