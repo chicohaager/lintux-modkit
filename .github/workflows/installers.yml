@@ -17,7 +17,7 @@ jobs:
           sudo install -m 0755 /tmp/shellcheck-v0.11.0/shellcheck /usr/local/bin/shellcheck
           shellcheck --version
       - name: shellcheck
-        run: shellcheck -x install.sh install-with-firewall.sh install-without-firewall.sh tools/gen-installers.sh tools/test-semver.sh tools/test-tailnet.sh tools/test-decisions.sh tools/test-sysext.sh sysext/build-sysext.sh sysext/lint-units.sh sysext/uninstall-watchdog.sh sysext/unit-watchdog.sh sysext/bundle-debian.sh tools/test-unit-watchdog.sh
+        run: shellcheck -x install.sh install-with-firewall.sh install-without-firewall.sh tools/gen-installers.sh tools/test-semver.sh tools/test-tailnet.sh tools/test-decisions.sh tools/test-sysext.sh sysext/build-sysext.sh sysext/lint-units.sh sysext/uninstall-watchdog.sh sysext/unit-watchdog.sh sysext/bundle-debian.sh tools/test-unit-watchdog.sh sysext/add-web.sh
       - name: version comparison (semver_lt)
         run: bash tools/test-semver.sh
       - name: tailnet SSH guard (tailnet_ssh)

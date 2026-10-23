@@ -123,5 +123,29 @@ printf '{"name": "demo"}\n' > "$T/withjson/usr/share/casaos/modules/demo.json"
 out=$(SOURCE_DATE_EPOCH=1 sh "$BUILD" demo "$T/withjson" amd64 "$T/out9" 2>&1)
 case "$out" in *"modules/demo.json"*) bad "WARN trotz Modul-JSON: $out" ;; *) ok "mit Modul-JSON: keine WARN" ;; esac
 
+# add-web.sh: version into HTML and module JSON, common files copied, broken JS refused
+ADDWEB="$HERE/sysext/add-web.sh"
+mkweb() {  # <dir> <js>
+  mkdir -p "$1/usr/share/casaos/www/modules/demo" "$1/usr/share/casaos/modules"
+  printf '<script src="./app.js?v=@VERSION@"></script>\n' > "$1/usr/share/casaos/www/modules/demo/index.html"
+  printf '%s\n' "$2" > "$1/usr/share/casaos/www/modules/demo/app.js"
+  printf '{"name": "demo", "version": "v@VERSION@"}\n' > "$1/usr/share/casaos/modules/demo.json.in"
+}
+mkweb "$T/web1" "const a = 1;"
+if sh "$ADDWEB" demo "$T/web1" 2.0.1 >/dev/null 2>&1 \
+   && grep -q 'app.js?v=2.0.1' "$T/web1/usr/share/casaos/www/modules/demo/index.html" \
+   && grep -q '"version": "v2.0.1"' "$T/web1/usr/share/casaos/modules/demo.json" \
+   && [ ! -e "$T/web1/usr/share/casaos/modules/demo.json.in" ] \
+   && [ -f "$T/web1/usr/share/casaos/www/modules/demo/common.js" ]; then
+  ok "add-web: Version eingesetzt, JSON erzeugt, common.js kopiert"
+else
+  bad "add-web: Ergebnis falsch"
+fi
+mkweb "$T/web2" "const a = ;"
+if sh "$ADDWEB" demo "$T/web2" 2.0.1 >/dev/null 2>&1; then bad "add-web: kaputtes JS angenommen"; else ok "add-web: kaputtes JS abgelehnt"; fi
+mkweb "$T/web3" "const a = 1;"
+printf '{"name": "other"}\n' > "$T/web3/usr/share/casaos/modules/demo.json.in"
+if sh "$ADDWEB" demo "$T/web3" 2.0.1 >/dev/null 2>&1; then bad "add-web: falscher JSON-Name angenommen"; else ok "add-web: falscher JSON-Name abgelehnt"; fi
+
 echo "---- $pass ok, $fail FAIL"
 [ "$fail" -eq 0 ]
