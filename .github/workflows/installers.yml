@@ -30,6 +30,8 @@ jobs:
           bash tools/test-sysext.sh
       - name: sysext unit watchdog (unit-watchdog.sh)
         run: bash tools/test-unit-watchdog.sh
+      - name: tile helper (web/common.js zfw)
+        run: node tools/test-web-zfw.mjs
   go:
     runs-on: ubuntu-latest
     steps:
