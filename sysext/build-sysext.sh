@@ -46,6 +46,14 @@ mkdir -p "$STAGE/usr/lib/extension-release.d"
 rm -f "$STAGE"/usr/lib/extension-release.d/extension-release.*
 printf 'ID=_any\nARCHITECTURE=%s\n' "$SYSARCH" > "$STAGE/usr/lib/extension-release.d/extension-release.$NAME"
 [ -z "$VERSION" ] || printf 'SYSEXT_VERSION_ID=%s\n' "$VERSION" >> "$STAGE/usr/lib/extension-release.d/extension-release.$NAME"
+# Der Stand von lintux-modkit gehoert zum Image (add-web.sh, common.js, unit-watchdog.sh fliessen
+# hinein): wer ein Release nachbaut, liest hier, welchen Commit er dafuer auschecken muss.
+MODKIT_REV=$(git -C "$HERE" rev-parse HEAD 2>/dev/null || echo unbekannt)
+if [ "$MODKIT_REV" != unbekannt ] && [ -n "$(git -C "$HERE" status --porcelain 2>/dev/null)" ]; then
+  MODKIT_REV="$MODKIT_REV+dirty"
+fi
+mkdir -p "$STAGE/usr/share/doc/$NAME"
+printf 'lintux-modkit %s\n' "$MODKIT_REV" > "$STAGE/usr/share/doc/$NAME/lintux-modkit.txt"
 
 sh "$HERE/lint-units.sh" "$STAGE"
 # zpkg zaehlt ein Modul nur mit usr/share/casaos/modules/<name>.json als installiert; ohne sie bindet
@@ -67,4 +75,4 @@ if [ "$ARCH" = amd64 ]; then
   cp -f "$RAW" "$OUT/$NAME.raw"
   ( cd "$OUT" && sha256sum "$NAME.raw" > "$NAME.raw.sha256" )
 fi
-echo "gebaut: $RAW ($(wc -c < "$RAW") Bytes, SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH, ARCHITECTURE=$SYSARCH${VERSION:+, SYSEXT_VERSION_ID=$VERSION})"
+echo "gebaut: $RAW ($(wc -c < "$RAW") Bytes, SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH, ARCHITECTURE=$SYSARCH${VERSION:+, SYSEXT_VERSION_ID=$VERSION}, lintux-modkit $MODKIT_REV)"
