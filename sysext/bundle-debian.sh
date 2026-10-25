@@ -36,6 +36,10 @@ GLIBC_MAX="${GLIBC_MAX:-2.41}"
 # vom laufenden Spiegel: sonst holt ein spaeterer Bau andere Paketversionen und das Abbild weicht ab
 # (gemessen 2026-10-23: zwei Bauten am selben Tag gleich, aber apt-get update gegen deb.debian.org).
 DEBIAN_SNAPSHOT="${DEBIAN_SNAPSHOT:-20261020T213255Z}"
+# Der feste Stand haelt auch Sicherheits-Updates fern (Rueckmeldung 25.10.2026). Darum prueft jeder Bau
+# die mitgelieferten Pakete gegen den laufenden Spiegel und bricht ab, wenn dort eines neuer ist:
+# DEBIAN_SNAPSHOT anheben. Nur wer bewusst einen alten Stand nachbaut, setzt DEBIAN_SNAPSHOT_ALLOW_OLD=1.
+DEBIAN_SNAPSHOT_ALLOW_OLD="${DEBIAN_SNAPSHOT_ALLOW_OLD:-0}"
 
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
@@ -43,7 +47,7 @@ OUT=$(cd "$OUT" && pwd)
 INNER=$(sed -n '/^#--- im Container ---$/,$p' "$0")
 
 docker run --rm --platform "linux/$ARCH" \
-  -e NAME="$NAME" -e PKGS="$PKGS" -e GLIBC_MAX="$GLIBC_MAX" -e DEBIAN_SNAPSHOT="$DEBIAN_SNAPSHOT" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+  -e NAME="$NAME" -e PKGS="$PKGS" -e GLIBC_MAX="$GLIBC_MAX" -e DEBIAN_SNAPSHOT="$DEBIAN_SNAPSHOT" -e DEBIAN_SNAPSHOT_ALLOW_OLD="$DEBIAN_SNAPSHOT_ALLOW_OLD" -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
   -v "$OUT:/out" "$IMAGE" sh -c "$INNER" sh "$@"
 exit 0
 
@@ -112,4 +116,22 @@ while read -r pk; do
   fi
 done < /tmp/pkgs
 echo "Pakete: $(wc -l < "$D/packages.txt"), Bibliotheken: $(find "$L" -type f | wc -l)"
+
+# Frische: dieselben Pakete gegen den laufenden Spiegel (deb.debian.org) halten.
+sed -i -E "s#^URIs: http://snapshot\.debian\.org/archive/(debian(-security)?)/$DEBIAN_SNAPSHOT\$#URIs: http://deb.debian.org/\\1#" "$S"
+[ "$(grep -c '^URIs: http://deb.debian.org/' "$S")" -eq 2 ] || { echo "Spiegel nicht eingetragen: $S" >&2; exit 1; }
+apt-get update -qq >/dev/null
+: > /tmp/behind
+while read -r pk ver; do
+  cand=$(apt-cache policy "$pk" | awk '/Candidate:/{print $2}')
+  if [ -n "$cand" ] && [ "$cand" != "(none)" ] && dpkg --compare-versions "$cand" gt "$ver"; then echo "  $pk $ver -> $cand" >> /tmp/behind; fi
+done < "$D/packages.txt"
+chown -R "$HOST_UID:$HOST_GID" /out
+if [ -s /tmp/behind ]; then
+  echo "Debian-Stand $DEBIAN_SNAPSHOT ist veraltet, im Spiegel neuer:" >&2; cat /tmp/behind >&2
+  if [ "$DEBIAN_SNAPSHOT_ALLOW_OLD" = 1 ]; then echo "DEBIAN_SNAPSHOT_ALLOW_OLD=1: Bau trotzdem fortgesetzt" >&2; else
+    echo "DEBIAN_SNAPSHOT anheben (Sicherheits-Updates), oder DEBIAN_SNAPSHOT_ALLOW_OLD=1 nur fuer den Nachbau eines alten Release" >&2; exit 3; fi
+else
+  echo "Debian-Stand $DEBIAN_SNAPSHOT aktuell: $(wc -l < "$D/packages.txt") Pakete gegen den Spiegel geprueft, keins neuer"
+fi
 chown -R "$HOST_UID:$HOST_GID" /out
