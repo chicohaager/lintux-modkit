@@ -123,6 +123,28 @@ printf '{"name": "demo"}\n' > "$T/withjson/usr/share/casaos/modules/demo.json"
 out=$(SOURCE_DATE_EPOCH=1 sh "$BUILD" demo "$T/withjson" amd64 "$T/out9" 2>&1)
 case "$out" in *"modules/demo.json"*) bad "WARN trotz Modul-JSON: $out" ;; *) ok "mit Modul-JSON: keine WARN" ;; esac
 
+# lintux-modkit-Stand im Image: Commit, +dirty bei geaenderter Kopie, "unbekannt" ausserhalb von git
+modkit_in() {  # <out-dir>: Inhalt von usr/share/doc/demo/lintux-modkit.txt im Image
+  unsquashfs -cat "$1/demo-amd64.raw" usr/share/doc/demo/lintux-modkit.txt 2>/dev/null
+}
+export GIT_CEILING_DIRECTORIES="$T"
+mkdir -p "$T/mk/sysext"; cp "$HERE"/sysext/*.sh "$T/mk/sysext/"
+git -C "$T/mk" init -q && git -C "$T/mk" add sysext \
+  && git -C "$T/mk" -c user.name=t -c user.email=t@t commit -qm t
+rev=$(git -C "$T/mk" rev-parse HEAD)
+SOURCE_DATE_EPOCH=1 sh "$T/mk/sysext/build-sysext.sh" demo "$T/withjson" amd64 "$T/out10" >/dev/null 2>&1
+got=$(modkit_in "$T/out10")
+if [ "$got" = "lintux-modkit $rev" ]; then ok "lintux-modkit-Commit im Image"; else bad "lintux-modkit im Image: '$got', erwartet 'lintux-modkit $rev'"; fi
+printf '# x\n' >> "$T/mk/sysext/add-web.sh"
+SOURCE_DATE_EPOCH=1 sh "$T/mk/sysext/build-sysext.sh" demo "$T/withjson" amd64 "$T/out11" >/dev/null 2>&1
+got=$(modkit_in "$T/out11")
+if [ "$got" = "lintux-modkit $rev+dirty" ]; then ok "geaenderter lintux-modkit: +dirty im Image"; else bad "geaenderter lintux-modkit im Image: '$got'"; fi
+mkdir -p "$T/nogit/sysext"; cp "$HERE"/sysext/*.sh "$T/nogit/sysext/"
+SOURCE_DATE_EPOCH=1 sh "$T/nogit/sysext/build-sysext.sh" demo "$T/withjson" amd64 "$T/out12" >/dev/null 2>&1
+got=$(modkit_in "$T/out12")
+if [ "$got" = "lintux-modkit unbekannt" ]; then ok "lintux-modkit ohne git: unbekannt"; else bad "lintux-modkit ohne git: '$got'"; fi
+unset GIT_CEILING_DIRECTORIES
+
 # add-web.sh: version into HTML and module JSON, common files copied, broken JS refused
 ADDWEB="$HERE/sysext/add-web.sh"
 mkweb() {  # <dir> <js>
