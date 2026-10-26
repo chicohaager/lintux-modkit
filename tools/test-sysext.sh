@@ -163,6 +163,12 @@ if sh "$ADDWEB" demo "$T/web1" 2.0.1 >/dev/null 2>&1 \
 else
   bad "add-web: Ergebnis falsch"
 fi
+# every module with a tile gets the AppData guard for its units (ExecStartPre), executable for sh
+if [ -f "$T/web1/usr/libexec/demo/appdata-guard.sh" ] && cmp -s "$HERE/sysext/appdata-guard.sh" "$T/web1/usr/libexec/demo/appdata-guard.sh"; then
+  ok "add-web: appdata-guard.sh nach /usr/libexec/demo"
+else
+  bad "add-web: appdata-guard.sh fehlt in /usr/libexec/demo"
+fi
 mkweb "$T/web2" "const a = ;"
 if sh "$ADDWEB" demo "$T/web2" 2.0.1 >/dev/null 2>&1; then bad "add-web: kaputtes JS angenommen"; else ok "add-web: kaputtes JS abgelehnt"; fi
 mkweb "$T/web3" "const a = 1;"

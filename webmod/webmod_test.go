@@ -87,3 +87,23 @@ func TestEnvPrefix(t *testing.T) {
 		t.Fatalf("envPrefix = %q", got)
 	}
 }
+
+// A module's data directory under /DATA/AppData is checked before anything else
+// (appdata.Secure): a symlink planted there must stop the start.
+func TestDataDirsAreSecuredBeforeTheStart(t *testing.T) {
+	base := t.TempDir()
+	if err := os.Chmod(base, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ok := filepath.Join(base, "good")
+	if err := secureDataDirs([]string{ok}); err != nil {
+		t.Fatalf("a fresh directory: %v", err)
+	}
+	link := filepath.Join(base, "planted")
+	if err := os.Symlink(t.TempDir(), link); err != nil {
+		t.Fatal(err)
+	}
+	if err := secureDataDirs([]string{ok, link}); err == nil || !strings.Contains(err.Error(), link) {
+		t.Fatalf("err %v, want a refusal naming %s", err, link)
+	}
+}
