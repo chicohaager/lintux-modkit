@@ -21,9 +21,13 @@ mkdir -m 777 "$T/b/zfw" && chmod 777 "$T/b/zfw"
 case_ "andere duerfen in den Ordner schreiben" 1 "$T/b/zfw" "andere duerfen in $T/b/zfw schreiben"
 mkdir "$T/c" && chmod 777 "$T/c" && mkdir "$T/c/AppData" && chmod 755 "$T/c/AppData"
 case_ "Vorfahr 0777 ohne Sticky" 1 "$T/c/AppData/x" "$T/c (Modus 777)"
+out=$(sh sysext/appdata-guard.sh --no-create "$T/a/neu" 2>&1); rc=$?
+if [ "$rc" = 1 ] && [ ! -e "$T/a/neu" ] && [ "${out#*fehlt}" != "$out" ]; then echo "ok   --no-create: fehlender Ordner verweigert, nicht angelegt"; else echo "FAIL --no-create: rc=$rc, angelegt=$([ -e "$T/a/neu" ] && echo ja || echo nein): $out"; F=$((F + 1)); fi
+out=$(sh sysext/appdata-guard.sh --no-create "$T/a/wireguard" 2>&1); rc=$?
+if [ "$rc" = 0 ]; then echo "ok   --no-create: vorhandener Ordner geht"; else echo "FAIL --no-create vorhandener Ordner: rc=$rc $out"; F=$((F + 1)); fi
 case_ "Weg nicht lesbar (fehlender Vorfahr)" 1 "$T/fehlt/AppData/x" "nicht lesbar"
 export APPDATA_GUARD_PATH_UID="$APPDATA_GUARD_UID"
 APPDATA_GUARD_UID=4242
 case_ "Ordner gehoert jemand anderem" 1 "$T/a/wireguard" "$T/a/wireguard gehoert uid"
-if [ $F = 0 ]; then echo "✓ appdata-guard: 8 Faelle"; else echo "✗ appdata-guard: $F Fehler"; fi
+if [ $F = 0 ]; then echo "✓ appdata-guard: 10 Faelle"; else echo "✗ appdata-guard: $F Fehler"; fi
 exit $F

@@ -2,7 +2,9 @@
 # Shell-Gegenstueck zu appdata.Secure: prueft vor dem Start eines Dienstes, dass root dem Modulordner
 # unter /DATA/AppData trauen kann, und setzt das Sticky-Bit auf den Elternordner.
 #
-#   sh appdata-guard.sh <ordner>...      Exit 0 = sicher, 1 = verweigert (Meldung auf stderr)
+#   sh appdata-guard.sh [--no-create] <ordner>...   Exit 0 = sicher, 1 = verweigert (Meldung auf stderr)
+#   --no-create: ein fehlender Ordner wird verweigert statt angelegt (fuer Skripte, die bewusst nichts
+#   anlegen, solange die Platte mit dem Ordner nicht da ist - sonst legte ein anderer ihn an)
 #
 # Warum: /DATA/AppData ist auf ZimaOS 1.8 0777 ohne Sticky-Bit (gemessen .184, 26.10.2026, KB §79.11),
 # die Freigabe von /DATA ist per SMB beschreibbar - wer dort schreibt, benennt den Ordner eines Moduls um
@@ -26,7 +28,9 @@ protected() { # <oktalmodus>
   [ $(( 0$m & 022 )) -eq 0 ] || [ "$sticky" = 1 ]
 }
 
-[ $# -ge 1 ] || refuse "Aufruf: appdata-guard.sh <ordner>..."
+CREATE=1
+[ "${1:-}" = --no-create ] && { CREATE=0; shift; }
+[ $# -ge 1 ] || refuse "Aufruf: appdata-guard.sh [--no-create] <ordner>..."
 for dir in "$@"; do
   dir=${dir%/}
   parent=$(dirname "$dir")
@@ -47,6 +51,7 @@ for dir in "$@"; do
     chmod +t "$parent" || refuse "Sticky-Bit auf $parent nicht gesetzt"
   fi
   if [ ! -e "$dir" ] && [ ! -L "$dir" ]; then
+    [ "$CREATE" = 1 ] || refuse "$dir fehlt"
     mkdir -m 700 "$dir" || refuse "$dir nicht angelegt"
   fi
   [ ! -L "$dir" ] || refuse "$dir ist ein Symlink"
