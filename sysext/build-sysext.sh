@@ -63,6 +63,10 @@ sh "$HERE/lint-units.sh" "$STAGE"
   || echo "WARN $NAME: keine usr/share/casaos/modules/$NAME.json - zpkg install meldet dann rc=1 'module not installed'"
 
 umask 022
+# Rechte nicht von der umask des Checkouts erben (664/775 unter umask 002, 644/755 in der CI):
+# sonst ergibt derselbe Commit lokal und in der CI verschiedene Images (gemessen 2026-10-26).
+# Erst hier, nach allem, was das Skript selbst anlegt (extension-release, lintux-modkit.txt).
+chmod -R go-w "$STAGE"
 find "$STAGE" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
 mkdir -p "$OUT"
 RAW="$OUT/$NAME-$ARCH.raw"
