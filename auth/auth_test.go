@@ -247,6 +247,48 @@ func TestJWKSResolver(t *testing.T) {
 	}
 }
 
+// The route table is no trust anchor: on ZimaOS 1.8 a process without root
+// upserts a route without login (measured on .184, 2026-10-26: POST
+// /v1/gateway/routes as uid 999 → 201), so it could point /.well-known/jwks.json
+// at its own keys. user-service.url is written by root, mode 0600 (measured): when
+// it is there, the JWKS comes from it, whatever the table says.
+func TestJWKSResolverTrustsUserServiceURLOverTheRouteTable(t *testing.T) {
+	trustedUID = os.Geteuid()
+	defer func() { trustedUID = 0 }()
+	gw := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]map[string]string{{"path": jwksRoute, "target": "http://127.0.0.1:9"}}) // the planted route
+	}))
+	defer gw.Close()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "management.url"), []byte(gw.URL+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	us := filepath.Join(dir, "user-service.url")
+	if err := os.WriteFile(us, []byte("http://127.0.0.1:37815"), 0o600); err != nil { // no newline, as ZimaOS writes it
+		t.Fatal(err)
+	}
+	got, err := JWKSResolver(dir)(context.Background())
+	if err != nil || got != "http://127.0.0.1:37815"+jwksRoute {
+		t.Fatalf("resolver = %q, %v; want the user service's own JWKS", got, err)
+	}
+	// a file others can write is no anchor either, and no reason to fall back to the table
+	if err := os.Chmod(us, 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := JWKSResolver(dir)(context.Background()); err == nil {
+		t.Fatalf("user-service.url writable by others accepted: %q", got)
+	}
+	if err := os.Chmod(us, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(us, []byte("http://203.0.113.9:37815\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := JWKSResolver(dir)(context.Background()); err == nil || !strings.Contains(err.Error(), "loopback") {
+		t.Fatalf("off-host user service accepted: %v", err)
+	}
+}
+
 // The user service issues a new key when it restarts. A token signed with
 // the new key must pass although the verifier still caches the old set —
 // once the cache is older than the retry floor; a fresh cache is not
