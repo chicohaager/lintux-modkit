@@ -8,6 +8,7 @@
 #   - replaces @VERSION@ in the HTML files (cache-busting: a browser must not keep an
 #     old app.js after an upgrade) and turns usr/share/casaos/modules/<name>.json.in
 #     into <name>.json,
+#   - copies sysext/appdata-guard.sh to <rootfs>/usr/libexec/<name>/ for the module's units,
 #   - checks every .js with `node --check` and the module JSON with python3.
 set -eu
 NAME="${1:?name}"; ROOT="${2:?rootfs-dir}"; VERSION="${3:?version}"
@@ -20,6 +21,9 @@ JSON_IN="$ROOT/usr/share/casaos/modules/$NAME.json.in"
 [ -f "$JSON_IN" ] || { echo "no module JSON template $JSON_IN" >&2; exit 1; }
 
 cp "$HERE/web/common.js" "$HERE/web/styles.css" "$WEB/"
+# the guard for units that read a file under /DATA/AppData (ExecStartPre=/bin/sh /usr/libexec/<name>/appdata-guard.sh <dir>)
+mkdir -p "$ROOT/usr/libexec/$NAME"
+cp "$HERE/sysext/appdata-guard.sh" "$ROOT/usr/libexec/$NAME/appdata-guard.sh"
 for f in "$WEB"/*.html; do
   [ -f "$f" ] || continue
   sed -i "s/@VERSION@/$VERSION/g" "$f"

@@ -26,6 +26,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/chicohaager/lintux-modkit/appdata"
 	"github.com/chicohaager/lintux-modkit/auth"
 	"github.com/chicohaager/lintux-modkit/gateway"
 	"github.com/chicohaager/lintux-modkit/httpx"
@@ -46,6 +47,11 @@ type Options struct {
 	Route string
 	// Version is reported by GET <Route>/health.
 	Version string
+	// DataDirs are the module's directories under /DATA/AppData. Run checks them
+	// with appdata.Secure before anything else and does not start when one cannot
+	// be trusted (a symlink, not root's, writable by others): that directory is
+	// 0777 without the sticky bit on ZimaOS 1.8, anyone writing there can swap it.
+	DataDirs []string
 	// Restart lists the units whose binary the module ships, e.g.
 	// "nebula.service": each one still running an older binary is restarted
 	// at start (stale.Restart). Template instances need their full names.
@@ -74,6 +80,9 @@ func Handler(o Options, verify func(http.Handler) http.Handler, staticDir string
 // the shipped unit sets neither.
 func Run(o Options) {
 	log.Printf("[%s] starting v%s", o.Service, o.Version)
+	if err := secureDataDirs(o.DataDirs); err != nil {
+		log.Fatalf("[%s] %v", o.Service, err)
+	}
 	if len(o.Restart) > 0 {
 		for _, u := range stale.Restart(context.Background(), stale.Options{Units: o.Restart}) {
 			log.Printf("[%s] restarted %s: it ran the binary of the replaced module", o.Service, u)
@@ -147,4 +156,14 @@ func envPrefix(s string) string {
 		}
 	}
 	return string(b)
+}
+
+// secureDataDirs runs appdata.Secure on each data directory (ZIMAOS-KNOWLEDGE §79.11).
+func secureDataDirs(dirs []string) error {
+	for _, d := range dirs {
+		if err := appdata.Secure(d); err != nil {
+			return err
+		}
+	}
+	return nil
 }
