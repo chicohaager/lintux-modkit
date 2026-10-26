@@ -143,6 +143,13 @@ mkdir -p "$T/nogit/sysext"; cp "$HERE"/sysext/*.sh "$T/nogit/sysext/"
 SOURCE_DATE_EPOCH=1 sh "$T/nogit/sysext/build-sysext.sh" demo "$T/withjson" amd64 "$T/out12" >/dev/null 2>&1
 got=$(modkit_in "$T/out12")
 if [ "$got" = "lintux-modkit unbekannt" ]; then ok "lintux-modkit ohne git: unbekannt"; else bad "lintux-modkit ohne git: '$got'"; fi
+# Rechte im Image haengen nicht an der umask des Bauenden: ein Checkout unter umask 002 (664/775)
+# und einer unter 022 (CI) muessen dasselbe Image ergeben (gemessen 2026-10-26: cron lokal/CI ungleich)
+cp -a "$T/withjson" "$T/gw"; chmod -R g+w,o+w "$T/gw"
+SOURCE_DATE_EPOCH=1 sh "$T/mk/sysext/build-sysext.sh" demo "$T/gw" amd64 "$T/out13" >/dev/null 2>&1
+wr=$(unsquashfs -lln "$T/out13/demo-amd64.raw" 2>/dev/null | awk '$1 !~ /^l/ && (substr($1,6,1)=="w" || substr($1,9,1)=="w")' | wc -l)
+n=$(unsquashfs -lln "$T/out13/demo-amd64.raw" 2>/dev/null | wc -l)
+if [ "$n" -gt 2 ] && [ "$wr" -eq 0 ]; then ok "Image ohne Schreibrecht fuer Gruppe/andere ($n Eintraege)"; else bad "Image: $wr von $n Eintraegen fuer Gruppe/andere schreibbar"; fi
 unset GIT_CEILING_DIRECTORIES
 
 # add-web.sh: version into HTML and module JSON, common files copied, broken JS refused
