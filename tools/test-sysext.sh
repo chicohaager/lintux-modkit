@@ -150,6 +150,13 @@ SOURCE_DATE_EPOCH=1 sh "$T/mk/sysext/build-sysext.sh" demo "$T/gw" amd64 "$T/out
 wr=$(unsquashfs -lln "$T/out13/demo-amd64.raw" 2>/dev/null | awk '$1 !~ /^l/ && (substr($1,6,1)=="w" || substr($1,9,1)=="w")' | wc -l)
 n=$(unsquashfs -lln "$T/out13/demo-amd64.raw" 2>/dev/null | wc -l)
 if [ "$n" -gt 2 ] && [ "$wr" -eq 0 ]; then ok "Image ohne Schreibrecht fuer Gruppe/andere ($n Eintraege)"; else bad "Image: $wr von $n Eintraegen fuer Gruppe/andere schreibbar"; fi
+# und unter umask 077 (sudo-Helfer, gemessen 2026-10-26 auf ZimaOS: 700/600) bleibt jedes Element
+# fuer andere lesbar: ein 700-Ordner unter /usr sperrte Nutzer ohne root aus dem Overlay
+cp -a "$T/withjson" "$T/u77"; chmod -R go-rwx "$T/u77"
+(umask 077 && SOURCE_DATE_EPOCH=1 sh "$T/mk/sysext/build-sysext.sh" demo "$T/u77" amd64 "$T/out14" >/dev/null 2>&1)
+nr=$(unsquashfs -lln "$T/out14/demo-amd64.raw" 2>/dev/null | awk '$1 !~ /^l/ && substr($1,8,1)!="r"' | wc -l)
+n=$(unsquashfs -lln "$T/out14/demo-amd64.raw" 2>/dev/null | wc -l)
+if [ "$n" -gt 2 ] && [ "$nr" -eq 0 ]; then ok "umask 077: alles fuer andere lesbar ($n Eintraege)"; else bad "umask 077: $nr von $n Eintraegen fuer andere nicht lesbar"; fi
 unset GIT_CEILING_DIRECTORIES
 
 # add-web.sh: version into HTML and module JSON, common files copied, broken JS refused
