@@ -1,6 +1,9 @@
 // Package webmod runs the web backend of a ZimaOS module: the frame every
 // Lintux module with a dashboard tile repeats (cron, zbackup, modmanager).
 //
+//   - restarts the module's own daemons that still run the binary of a
+//     replaced image (Options.Restart, see the stale package): zpkg starts
+//     the web backend again on every module update, the daemons it does not,
 //   - installs the boot watchdog for its own service (sysext units are not
 //     started at boot, see the watchdog package),
 //   - listens on a random loopback port and registers the route prefix with
@@ -26,6 +29,7 @@ import (
 	"github.com/chicohaager/lintux-modkit/auth"
 	"github.com/chicohaager/lintux-modkit/gateway"
 	"github.com/chicohaager/lintux-modkit/httpx"
+	"github.com/chicohaager/lintux-modkit/stale"
 	"github.com/chicohaager/lintux-modkit/watchdog"
 )
 
@@ -42,6 +46,10 @@ type Options struct {
 	Route string
 	// Version is reported by GET <Route>/health.
 	Version string
+	// Restart lists the units whose binary the module ships, e.g.
+	// "nebula.service": each one still running an older binary is restarted
+	// at start (stale.Restart). Template instances need their full names.
+	Restart []string
 	// API builds the API handler. verify wraps a handler with the session
 	// token check; <Route>/health is served by webmod without it.
 	API func(verify func(http.Handler) http.Handler) http.Handler
@@ -66,6 +74,11 @@ func Handler(o Options, verify func(http.Handler) http.Handler, staticDir string
 // the shipped unit sets neither.
 func Run(o Options) {
 	log.Printf("[%s] starting v%s", o.Service, o.Version)
+	if len(o.Restart) > 0 {
+		for _, u := range stale.Restart(context.Background(), stale.Options{Units: o.Restart}) {
+			log.Printf("[%s] restarted %s: it ran the binary of the replaced module", o.Service, u)
+		}
+	}
 	if err := watchdog.Install(watchdog.Options{Service: o.Service, Binary: o.Binary}); err != nil {
 		log.Printf("[%s] %v", o.Service, err)
 	}
