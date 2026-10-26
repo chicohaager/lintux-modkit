@@ -36,6 +36,7 @@ Still required on ZimaOS 1.8.0-beta1: the boot watchdog. A sysext with `EXTENSIO
 
 ```sh
 bash tools/test-sysext.sh   # 21 cases, each rule against a case that must fire and one that must not
+bash tools/check-release.sh <module-dir> <tag> <name>   # a module release rebuilt from its tag with the stamped lintux-modkit commit: same bytes? (ASSET_FILE=<image> before uploading)
 ```
 
 ```sh
