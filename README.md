@@ -4,7 +4,7 @@ Shared Go packages for the Lintux modules for ZimaOS (ZFW, Cron, Sync & Backup),
 
 | Package | What |
 |---|---|
-| `auth` | ZimaOS session-token verifier (ES256 against the platform JWKS, resolved through the gateway route table), HTTP middleware |
+| `auth` | ZimaOS session-token verifier (ES256 against the platform JWKS, found through `user-service.url`, which only root writes — the gateway route table only on systems without that file: a process without root can change the table), HTTP middleware |
 | `notify` | Webhook (generic, n8n, Discord, Slack, Home Assistant, Uptime Kuma), e-mail and Telegram delivery |
 | `schedule` | 5-field cron validation and next-run computation with one shared alias table |
 | `watchdog` | Boot watchdog and binary-refresh units in `/etc/systemd/system` for sysext services; `Uninstall` removes exactly those four units again |
