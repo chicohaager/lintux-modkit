@@ -18,6 +18,7 @@ jobs:
           shellcheck --version
       - name: shellcheck
         run: shellcheck -x install.sh install-with-firewall.sh install-without-firewall.sh tools/gen-installers.sh tools/test-semver.sh tools/test-tailnet.sh tools/test-decisions.sh tools/test-sysext.sh sysext/build-sysext.sh sysext/lint-units.sh sysext/uninstall-watchdog.sh sysext/unit-watchdog.sh sysext/bundle-debian.sh tools/test-unit-watchdog.sh sysext/add-web.sh sysext/appdata-guard.sh tools/test-appdata-guard.sh
+          shellcheck -S warning -s sh tools/hosttest-lib.sh tools/test-hosttest-lib.sh
       - name: version comparison (semver_lt)
         run: bash tools/test-semver.sh
       - name: tailnet SSH guard (tailnet_ssh)
@@ -32,6 +33,8 @@ jobs:
         run: bash tools/test-unit-watchdog.sh
       - name: appdata guard (appdata-guard.sh)
         run: sh tools/test-appdata-guard.sh
+      - name: host-test helper
+        run: sh tools/test-hosttest-lib.sh
       - name: tile helper (web/common.js zfw)
         run: node tools/test-web-zfw.mjs
   go:
