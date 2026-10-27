@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func testHandler(t *testing.T) http.Handler {
@@ -114,9 +115,9 @@ func TestHealthTellsAReplacedBinary(t *testing.T) {
 	running, file := filepath.Join(dir, "running"), filepath.Join(dir, "file")
 	_ = os.WriteFile(running, []byte("program v1"), 0o755)
 	_ = os.WriteFile(file, []byte("program v1"), 0o755)
-	old := selfExe
-	selfExe = running
-	t.Cleanup(func() { selfExe = old })
+	old, oldTTL := selfExe, binaryTTL
+	selfExe, binaryTTL = running, 0
+	t.Cleanup(func() { selfExe, binaryTTL = old, oldTTL })
 	o := Options{Name: "demo", Service: "demo-web", Route: "/demo", Version: "1.2.3", Binary: file,
 		API: func(func(http.Handler) http.Handler) http.Handler { return http.NotFoundHandler() }}
 	h := Handler(o, func(n http.Handler) http.Handler { return n }, dir)
@@ -146,8 +147,8 @@ func TestHealthTellsAReplacedBinary(t *testing.T) {
 	if w := do(b2, "GET", "/demo/health", nil); !strings.Contains(w.Body.String(), `"binary":"current"`) {
 		t.Fatalf("new process, same program: %s", w.Body)
 	}
-	_ = os.Remove(file)
-	_ = os.WriteFile(file, []byte("program v3, longer"), 0o755) // same size, new inode
+	// what `zpkg install --force` gave on 1.8.0: other bytes, same size, mtime, ctime and inode
+	_ = os.WriteFile(file, []byte("program v3, longer"), 0o755)
 	_ = os.Chtimes(file, fi.ModTime(), fi.ModTime())
 	if w := do(b2, "GET", "/demo/health", nil); !strings.Contains(w.Body.String(), `"binary":"replaced"`) {
 		t.Fatalf("same size and mtime, new content: %s", w.Body)
@@ -158,5 +159,27 @@ func TestHealthTellsAReplacedBinary(t *testing.T) {
 	}
 	if w := do(testHandler(t), "GET", "/demo/health", nil); !strings.Contains(w.Body.String(), `"binary":"unknown"`) {
 		t.Fatalf("no Binary set: %s", w.Body)
+	}
+}
+
+func TestHealthReusesTheHashWithinTheTTL(t *testing.T) {
+	dir := t.TempDir()
+	running, file := filepath.Join(dir, "running"), filepath.Join(dir, "file")
+	_ = os.WriteFile(running, []byte("program v1"), 0o755)
+	_ = os.WriteFile(file, []byte("program v1"), 0o755)
+	old, oldTTL := selfExe, binaryTTL
+	selfExe, binaryTTL = running, time.Hour
+	t.Cleanup(func() { selfExe, binaryTTL = old, oldTTL })
+	b := &binaryCheck{path: file}
+	if s := b.state("x"); s != "current" {
+		t.Fatal(s)
+	}
+	_ = os.WriteFile(file, []byte("program v2"), 0o755)
+	if s := b.state("x"); s != "current" {
+		t.Fatalf("within the TTL the hash is reused: %s", s)
+	}
+	b.hashed = time.Now().Add(-2 * time.Hour)
+	if s := b.state("x"); s != "replaced" {
+		t.Fatalf("after the TTL: %s", s)
 	}
 }

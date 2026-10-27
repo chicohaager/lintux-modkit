@@ -65,8 +65,12 @@ type Options struct {
 	API func(verify func(http.Handler) http.Handler) http.Handler
 }
 
-// selfExe is the running program; tests point it elsewhere.
-var selfExe = "/proc/self/exe"
+// selfExe is the running program, binaryTTL how long a file hash is reused;
+// tests change both.
+var (
+	selfExe   = "/proc/self/exe"
+	binaryTTL = 30 * time.Second
+)
 
 // binaryCheck compares the running program with the file at Options.Binary.
 // After a module update without a restart the process runs the old program
@@ -77,10 +81,7 @@ type binaryCheck struct {
 	once    sync.Once
 	running []byte
 	mu      sync.Mutex
-	mod     time.Time
-	size    int64
-	ino     uint64
-	ctime   syscall.Timespec
+	hashed  time.Time
 	file    []byte
 	logged  bool
 }
@@ -92,24 +93,21 @@ func (b *binaryCheck) state(service string) string {
 		return "unknown"
 	}
 	b.once.Do(func() { b.running, _ = sum(selfExe) })
-	fi, err := os.Stat(b.path)
-	if err != nil || b.running == nil {
+	if b.running == nil {
 		return "unknown"
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	// mtimes in a sysext come from the commit (SOURCE_DATE_EPOCH) and a deleted file's inode
-	// number is handed out again (measured on ext4): ctime, which no one can set back, joins the key
-	var ino uint64
-	var ctime syscall.Timespec
-	if st, ok := fi.Sys().(*syscall.Stat_t); ok {
-		ino, ctime = st.Ino, st.Ctim
-	}
-	if b.file == nil || !fi.ModTime().Equal(b.mod) || fi.Size() != b.size || ino != b.ino || ctime != b.ctime {
-		if b.file, err = sum(b.path); err != nil {
+	// No stat-based cache: after `zpkg install --force` of another image the file had the
+	// same size, mtime, ctime and inode (overlayfs over squashfs, mtimes from the commit;
+	// measured on ZimaOS 1.8.0, 27.10.2026) but other bytes. The hash is reused for binaryTTL.
+	if b.file == nil || time.Since(b.hashed) >= binaryTTL {
+		f, err := sum(b.path)
+		if err != nil {
+			b.file = nil
 			return "unknown"
 		}
-		b.mod, b.size, b.ino, b.ctime = fi.ModTime(), fi.Size(), ino, ctime
+		b.file, b.hashed = f, time.Now()
 	}
 	if bytes.Equal(b.file, b.running) {
 		return "current"
