@@ -89,3 +89,17 @@ func TestExecStartPath(t *testing.T) {
 		}
 	}
 }
+
+func TestFindNamesWithoutRestarting(t *testing.T) {
+	w := newWorld(t)
+	w.unit("nebula.service", "101", "old nebula", "new nebula")
+	w.unit("node-exporter.service", "102", "same", "same")
+	w.active["stopped.service"] = ""
+	got := Find(context.Background(), w.opts("nebula.service", "node-exporter.service", "stopped.service", "gone.service"))
+	if strings.Join(got, ",") != "nebula.service" {
+		t.Fatalf("found %v", got)
+	}
+	if len(w.restart) != 0 {
+		t.Fatalf("Find restarted %v", w.restart)
+	}
+}

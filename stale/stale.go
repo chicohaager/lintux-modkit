@@ -43,17 +43,19 @@ func systemctl(ctx context.Context, args ...string) ([]byte, error) {
 	return exec.CommandContext(ctx, "systemctl", args...).Output()
 }
 
-// Restart restarts each active unit whose running binary differs from the
-// binary its ExecStart names, and returns the units it restarted. A unit that
-// cannot be compared (no main PID, unreadable binary) is left running.
-func Restart(ctx context.Context, o Options) []string {
+// Find returns each active unit whose running binary differs from the binary
+// its ExecStart names, without touching it. A unit that cannot be compared (no
+// main PID, unreadable binary) is not in the list. Module Manager uses it to
+// tell a module that runs an older program than its image holds (`zpkg install
+// --force` does not restart services, measured on ZimaOS 1.8.0, 2026-10-27).
+func Find(ctx context.Context, o Options) []string {
 	if o.Proc == "" {
 		o.Proc = "/proc"
 	}
 	if o.Systemctl == nil {
 		o.Systemctl = systemctl
 	}
-	var done []string
+	var found []string
 	for _, u := range o.Units {
 		out, err := o.Systemctl(ctx, "show", "-p", "MainPID", "--value", u)
 		pid := strings.TrimSpace(string(out))
@@ -71,12 +73,23 @@ func Restart(ctx context.Context, o Options) []string {
 			log.Printf("stale: %s not compared: %v %v", u, err1, err2)
 			continue
 		}
-		if bytes.Equal(running, current) {
-			continue
+		if !bytes.Equal(running, current) {
+			log.Printf("stale: %s (pid %s) runs an older %s", u, pid, bin)
+			found = append(found, u)
 		}
-		log.Printf("stale: %s (pid %s) runs an older %s: restarting it", u, pid, bin)
+	}
+	return found
+}
+
+// Restart restarts each unit Find returns and returns the units it restarted.
+func Restart(ctx context.Context, o Options) []string {
+	if o.Systemctl == nil {
+		o.Systemctl = systemctl
+	}
+	var done []string
+	for _, u := range Find(ctx, o) {
 		rctx, cancel := context.WithTimeout(ctx, 90*time.Second)
-		_, err = o.Systemctl(rctx, "restart", u)
+		_, err := o.Systemctl(rctx, "restart", u)
 		cancel()
 		if err != nil {
 			log.Printf("stale: restart %s: %v", u, err)
