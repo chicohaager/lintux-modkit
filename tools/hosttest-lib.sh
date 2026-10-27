@@ -9,7 +9,7 @@
 #   ht_made <kind> <path|unit>  register BEFORE creating: subvol, dir, file, unit, emptydir
 #                               (emptydir: a folder the tested code makes, removed with rmdir only)
 #                               scrub <mount>: a scrub the test starts, cancelled on cleanup — it runs
-#                               on in its own process when the test is killed (measured .184, 27.10.2026)
+#                               on in its own process when the test is killed (measured on a ZimaOS 1.8.0 host, 27.10.2026)
 #                               call <function>: the test's own cleanup for what has no kind here
 #                               (firewall rules, network namespaces, peer processes)
 #   pass <text> / fail <text>   count a result
@@ -19,7 +19,7 @@
 # Each kind is removed only when it still is that kind: a subvol only with inode 256 (the root of
 # a btrfs subvolume), a dir/file only below /DATA, /media, /etc/<module> or /tmp with a test
 # name, a unit only named *hosttest*, a call only for a function name. A path that fails its check stays and is named.
-# (27.10.2026: a probe script with set -e stopped before its cleanup and left two subvolumes on .184.)
+# (27.10.2026: a probe script with set -e stopped before its cleanup and left two subvolumes on a test host.)
 
 HT_LIST=""; HT_DONE=0; ok=0; bad=0
 pass() { ok=$((ok + 1)); echo "OK   $1"; }
@@ -39,7 +39,7 @@ ht_made() {
 }
 
 ht__testname() {
-  case "$1" in *hosttest*|*tiletest*|*zuse-*) return 0 ;; esac
+  case "$1" in *hosttest*|*tiletest*) return 0 ;; esac
   return 1
 }
 
