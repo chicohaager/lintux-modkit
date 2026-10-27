@@ -1,6 +1,7 @@
 package webmod
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -105,5 +106,57 @@ func TestDataDirsAreSecuredBeforeTheStart(t *testing.T) {
 	}
 	if err := secureDataDirs([]string{ok, link}); err == nil || !strings.Contains(err.Error(), link) {
 		t.Fatalf("err %v, want a refusal naming %s", err, link)
+	}
+}
+
+func TestHealthTellsAReplacedBinary(t *testing.T) {
+	dir := t.TempDir()
+	running, file := filepath.Join(dir, "running"), filepath.Join(dir, "file")
+	_ = os.WriteFile(running, []byte("program v1"), 0o755)
+	_ = os.WriteFile(file, []byte("program v1"), 0o755)
+	old := selfExe
+	selfExe = running
+	t.Cleanup(func() { selfExe = old })
+	o := Options{Name: "demo", Service: "demo-web", Route: "/demo", Version: "1.2.3", Binary: file,
+		API: func(func(http.Handler) http.Handler) http.Handler { return http.NotFoundHandler() }}
+	h := Handler(o, func(n http.Handler) http.Handler { return n }, dir)
+	state := func() string {
+		w := do(h, "GET", "/demo/health", nil)
+		var v map[string]string
+		if err := json.Unmarshal(w.Body.Bytes(), &v); err != nil || v["status"] != "ok" {
+			t.Fatalf("health: %d %s", w.Code, w.Body)
+		}
+		return v["binary"]
+	}
+	if s := state(); s != "current" {
+		t.Fatalf("same program: %q", s)
+	}
+	// the module was updated: a new file, the process still runs v1
+	_ = os.WriteFile(file, []byte("program v2, longer"), 0o755)
+	if s := state(); s != "replaced" {
+		t.Fatalf("new file: %q", s)
+	}
+	// back to v1 with the same size and mtime as v2, but a new file (new inode), as a sysext swap does
+	fi, _ := os.Stat(file)
+	_ = os.Remove(file)
+	_ = os.WriteFile(file, []byte("program v1, longer"), 0o755)
+	_ = os.Chtimes(file, fi.ModTime(), fi.ModTime())
+	_ = os.WriteFile(running, []byte("program v1, longer"), 0o755)
+	b2 := Handler(o, func(n http.Handler) http.Handler { return n }, dir) // a new process: reads its program again
+	if w := do(b2, "GET", "/demo/health", nil); !strings.Contains(w.Body.String(), `"binary":"current"`) {
+		t.Fatalf("new process, same program: %s", w.Body)
+	}
+	_ = os.Remove(file)
+	_ = os.WriteFile(file, []byte("program v3, longer"), 0o755) // same size, new inode
+	_ = os.Chtimes(file, fi.ModTime(), fi.ModTime())
+	if w := do(b2, "GET", "/demo/health", nil); !strings.Contains(w.Body.String(), `"binary":"replaced"`) {
+		t.Fatalf("same size and mtime, new content: %s", w.Body)
+	}
+	_ = os.Remove(file)
+	if s := state(); s != "unknown" {
+		t.Fatalf("no file: %q", s)
+	}
+	if w := do(testHandler(t), "GET", "/demo/health", nil); !strings.Contains(w.Body.String(), `"binary":"unknown"`) {
+		t.Fatalf("no Binary set: %s", w.Body)
 	}
 }

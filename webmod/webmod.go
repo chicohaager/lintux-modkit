@@ -16,13 +16,17 @@
 package webmod
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
+	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -61,15 +65,86 @@ type Options struct {
 	API func(verify func(http.Handler) http.Handler) http.Handler
 }
 
+// selfExe is the running program; tests point it elsewhere.
+var selfExe = "/proc/self/exe"
+
+// binaryCheck compares the running program with the file at Options.Binary.
+// After a module update without a restart the process runs the old program
+// while the file is new: `zpkg install --force` does not restart the service
+// (measured on ZimaOS 1.8.0, 27.10.2026). /proc/self/exe keeps the old program.
+type binaryCheck struct {
+	path    string
+	once    sync.Once
+	running []byte
+	mu      sync.Mutex
+	mod     time.Time
+	size    int64
+	ino     uint64
+	ctime   syscall.Timespec
+	file    []byte
+	logged  bool
+}
+
+// state is "current", "replaced" (the file differs from the running program:
+// restart the service) or "unknown" (no Binary set, or a file cannot be read).
+func (b *binaryCheck) state(service string) string {
+	if b.path == "" {
+		return "unknown"
+	}
+	b.once.Do(func() { b.running, _ = sum(selfExe) })
+	fi, err := os.Stat(b.path)
+	if err != nil || b.running == nil {
+		return "unknown"
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	// mtimes in a sysext come from the commit (SOURCE_DATE_EPOCH) and a deleted file's inode
+	// number is handed out again (measured on ext4): ctime, which no one can set back, joins the key
+	var ino uint64
+	var ctime syscall.Timespec
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+		ino, ctime = st.Ino, st.Ctim
+	}
+	if b.file == nil || !fi.ModTime().Equal(b.mod) || fi.Size() != b.size || ino != b.ino || ctime != b.ctime {
+		if b.file, err = sum(b.path); err != nil {
+			return "unknown"
+		}
+		b.mod, b.size, b.ino, b.ctime = fi.ModTime(), fi.Size(), ino, ctime
+	}
+	if bytes.Equal(b.file, b.running) {
+		return "current"
+	}
+	if !b.logged {
+		log.Printf("[%s] WARNING: %s was replaced since this process started; restart %s to run it", service, b.path, service)
+		b.logged = true
+	}
+	return "replaced"
+}
+
+func sum(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return nil, err
+	}
+	return h.Sum(nil), nil
+}
+
 // Handler composes health, API, CSRF and the static UI. Exported for tests.
+// GET <Route>/health answers {"status":"ok","version":…,"binary":"current|replaced|unknown"}.
 func Handler(o Options, verify func(http.Handler) http.Handler, staticDir string) http.Handler {
 	mux := http.NewServeMux()
+	bin := &binaryCheck{path: o.Binary}
 	mux.HandleFunc(o.Route+"/health", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			httpx.MethodNotAllowed(w)
 			return
 		}
-		httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": o.Version})
+		httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": o.Version, "binary": bin.state(o.Service)})
 	})
 	mux.Handle(o.Route+"/", o.API(verify))
 	return httpx.Static("/modules/"+o.Name+"/", staticDir, httpx.CSRF(mux))
