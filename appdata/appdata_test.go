@@ -209,3 +209,86 @@ func TestSecureGivesDataBackToRoot(t *testing.T) {
 		}
 	})
 }
+
+// Forum 9566: /DATA/AppData was a symlink and the guard refused it ("not a plain
+// directory"); striking the symlink test left the target's path unchecked. Secure
+// follows one step to a real path and checks that path up to / — and the path behind
+// a symlinked ancestor, which it did not check before.
+func TestSecureFollowsOneSymlinkToARealPath(t *testing.T) {
+	mkdir := func(t *testing.T, p string, mode os.FileMode) {
+		if err := os.Mkdir(p, mode); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(p, mode); err != nil { // past the umask
+			t.Fatal(err)
+		}
+	}
+	link := func(t *testing.T, to, at string) {
+		if err := os.Symlink(to, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	refused := func(t *testing.T, dir, want string) {
+		t.Helper()
+		if err := Secure(dir); err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("err %v, want %q", err, want)
+		}
+	}
+	t.Run("parent symlink to a safe path is followed", func(t *testing.T) {
+		root := tmp(t)
+		mkdir(t, filepath.Join(root, "disk"), 0o755)
+		mkdir(t, filepath.Join(root, "disk", "AppData"), 0o777)
+		mkdir(t, filepath.Join(root, "DATA"), 0o755)
+		link(t, filepath.Join(root, "disk", "AppData"), filepath.Join(root, "DATA", "AppData"))
+		if err := Secure(filepath.Join(root, "DATA", "AppData", "tailscale")); err != nil {
+			t.Fatal(err)
+		}
+		if fi, _ := os.Stat(filepath.Join(root, "disk", "AppData")); fi.Mode()&os.ModeSticky == 0 {
+			t.Fatalf("target %v: no sticky bit", fi.Mode())
+		}
+		if fi, err := os.Lstat(filepath.Join(root, "disk", "AppData", "tailscale")); err != nil || fi.Mode().Perm() != 0o700 {
+			t.Fatalf("dir %v %v", fi, err)
+		}
+	})
+	t.Run("parent symlink to a path under 0777 is refused, nothing created", func(t *testing.T) {
+		root := tmp(t)
+		open := filepath.Join(root, "open")
+		mkdir(t, open, 0o777)
+		mkdir(t, filepath.Join(open, "AppData"), 0o755)
+		mkdir(t, filepath.Join(root, "DATA"), 0o755)
+		link(t, filepath.Join(open, "AppData"), filepath.Join(root, "DATA", "AppData"))
+		refused(t, filepath.Join(root, "DATA", "AppData", "tailscale"), open+" (mode")
+		if _, err := os.Lstat(filepath.Join(open, "AppData", "tailscale")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("created: %v", err)
+		}
+	})
+	t.Run("symlink to a symlink, dangling, missing, a file", func(t *testing.T) {
+		root := tmp(t)
+		mkdir(t, filepath.Join(root, "real"), 0o755)
+		link(t, filepath.Join(root, "real"), filepath.Join(root, "one"))
+		link(t, filepath.Join(root, "one"), filepath.Join(root, "two"))
+		refused(t, filepath.Join(root, "two", "x"), "only a symlink to a real path")
+		link(t, filepath.Join(root, "nothing"), filepath.Join(root, "dead"))
+		refused(t, filepath.Join(root, "dead", "x"), "which is missing")
+		refused(t, filepath.Join(root, "absent", "x"), root+"/absent is missing")
+		if err := os.WriteFile(filepath.Join(root, "file"), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		refused(t, filepath.Join(root, "file", "x"), "is not a directory")
+	})
+	t.Run("ancestor symlink: the path behind it is checked", func(t *testing.T) {
+		root := tmp(t)
+		open := filepath.Join(root, "open")
+		mkdir(t, open, 0o777)
+		mkdir(t, filepath.Join(open, "sub"), 0o755)
+		mkdir(t, filepath.Join(open, "sub", "AppData"), 0o755)
+		link(t, filepath.Join(open, "sub"), filepath.Join(root, "bad"))
+		refused(t, filepath.Join(root, "bad", "AppData", "x"), open+" (mode")
+		mkdir(t, filepath.Join(root, "safe"), 0o755)
+		mkdir(t, filepath.Join(root, "safe", "AppData"), 0o755)
+		link(t, filepath.Join(root, "safe"), filepath.Join(root, "good"))
+		if err := Secure(filepath.Join(root, "good", "AppData", "nebula")); err != nil {
+			t.Fatal(err)
+		}
+	})
+}

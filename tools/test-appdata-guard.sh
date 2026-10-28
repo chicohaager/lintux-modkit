@@ -26,6 +26,27 @@ if [ "$rc" = 1 ] && [ ! -e "$T/a/neu" ] && [ "${out#*fehlt}" != "$out" ]; then o
 out=$(sh sysext/appdata-guard.sh --no-create "$T/a/wireguard" 2>&1); rc=$?
 if [ "$rc" = 0 ]; then ok=$((ok + 1)); echo "ok   --no-create: vorhandener Ordner geht"; else echo "FAIL --no-create vorhandener Ordner: rc=$rc $out"; F=$((F + 1)); fi
 case_ "Weg nicht lesbar (fehlender Vorfahr)" 1 "$T/fehlt/AppData/x" "nicht lesbar"
+# Symlink im Weg (Forum 9566: /DATA/AppData als Symlink, "kein echter Ordner"): gefolgt wird einem Schritt auf
+# einen echten Weg, der dann bis / geprueft wird
+mkdir -m 755 "$T/e" "$T/e/platte" && mkdir -m 777 "$T/e/platte/AppData" && chmod 777 "$T/e/platte/AppData" && mkdir -m 755 "$T/e/DATA"
+ln -s "$T/e/platte/AppData" "$T/e/DATA/AppData"
+case_ "Elternordner Symlink auf sicheren Weg: gefolgt" 0 "$T/e/DATA/AppData/tailscale" "Symlink auf $T/e/platte/AppData"
+if [ "$(stat -c %a "$T/e/platte/AppData")" = 1777 ] && [ "$(stat -c %a "$T/e/platte/AppData/tailscale")" = 700 ]; then ok=$((ok + 1)); echo "ok   Symlink: Sticky-Bit und Ordner 0700 am Ziel"; else echo "FAIL Symlink Ziel: $(stat -c %a "$T/e/platte/AppData") $(stat -c %a "$T/e/platte/AppData/tailscale" 2>&1)"; F=$((F + 1)); fi
+mkdir -m 755 "$T/f" && mkdir -m 777 "$T/f/offen" && chmod 777 "$T/f/offen" && mkdir -m 755 "$T/f/offen/AppData" "$T/f/DATA"
+ln -s "$T/f/offen/AppData" "$T/f/DATA/AppData"
+case_ "Elternordner Symlink, Ziel unter 0777 ohne Sticky" 1 "$T/f/DATA/AppData/tailscale" "$T/f/offen (Modus 777)"
+if [ ! -e "$T/f/offen/AppData/tailscale" ]; then ok=$((ok + 1)); echo "ok   unsicheres Ziel: nichts angelegt"; else echo "FAIL unsicheres Ziel: Ordner angelegt"; F=$((F + 1)); fi
+ln -s "$T/e/DATA/AppData" "$T/f/DATA/kette"
+case_ "Elternordner Symlink auf Symlink" 1 "$T/f/DATA/kette/x" "gefolgt wird nur einem Symlink"
+ln -s "$T/e/gibtsnicht" "$T/f/DATA/tot"
+case_ "Elternordner Symlink ins Leere" 1 "$T/f/DATA/tot/x" "das fehlt"
+case_ "Elternordner fehlt" 1 "$T/e/DATA/fehlt/x" "$T/e/DATA/fehlt fehlt"
+: > "$T/e/DATA/datei"
+case_ "Elternordner ist eine Datei" 1 "$T/e/DATA/datei/x" "ist kein Ordner"
+mkdir -m 755 "$T/f/offen/sub" "$T/f/offen/sub/AppData" && ln -s "$T/f/offen/sub" "$T/e/vorfahr"
+case_ "Vorfahr Symlink auf 0755 unter 0777: Weg des Ziels geprueft" 1 "$T/e/vorfahr/AppData/x" "$T/f/offen (Modus 777)"
+ln -s "$T/e/platte" "$T/e/vorfahr-gut"
+case_ "Vorfahr Symlink auf sicheren Weg" 0 "$T/e/vorfahr-gut/AppData/nebula" ""
 # Faelle mit fremder uid: als root ist die eigene uid 0 immer vertrauenswuerdig, sie greifen nur ohne root
 if [ "$(id -u)" != 0 ]; then
 export APPDATA_GUARD_PATH_UID="$APPDATA_GUARD_UID"
