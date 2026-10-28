@@ -45,6 +45,12 @@ case_ "Elternordner fehlt" 1 "$T/e/DATA/fehlt/x" "$T/e/DATA/fehlt fehlt"
 case_ "Elternordner ist eine Datei" 1 "$T/e/DATA/datei/x" "ist kein Ordner"
 mkdir -m 755 "$T/f/offen/sub" "$T/f/offen/sub/AppData" && ln -s "$T/f/offen/sub" "$T/e/vorfahr"
 case_ "Vorfahr Symlink auf 0755 unter 0777: Weg des Ziels geprueft" 1 "$T/e/vorfahr/AppData/x" "$T/f/offen (Modus 777)"
+mkdir -m 755 "$T/g" "$T/g/platte" "$T/g/platte/AppData" "$T/g/DATA"
+ln -s "$T/g/platte/AppData/" "$T/g/DATA/AppData" && ln -s "$T/g//platte//AppData" "$T/g/DATA/doppelt"
+case_ "Symlink-Ziel mit / am Ende" 0 "$T/g/DATA/AppData/tailscale" "Symlink auf $T/g/platte/AppData "
+case_ "Symlink-Ziel mit doppeltem /" 0 "$T/g/DATA/doppelt/cron" "Symlink auf $T/g/platte/AppData "
+ln -s "../platte/AppData" "$T/g/DATA/relativ-punkt"
+case_ "relatives Ziel mit .. bleibt verweigert" 1 "$T/g/DATA/relativ-punkt/x" "oder . und .."
 ln -s "$T/e/platte" "$T/e/vorfahr-gut"
 case_ "Vorfahr Symlink auf sicheren Weg" 0 "$T/e/vorfahr-gut/AppData/nebula" ""
 # Faelle mit fremder uid: als root ist die eigene uid 0 immer vertrauenswuerdig, sie greifen nur ohne root
@@ -72,8 +78,16 @@ if [ "$(id -u)" = 0 ]; then
   mkdir -p "$T/s/AppData" && chmod 755 "$T/s/AppData" && ln -s "$T/s" "$T/sl" && chown -h 4242 "$T/sl" && chown 4242 "$T/s"
   out=$(APPDATA_GUARD_UID=0 APPDATA_GUARD_PATH_UID=0 APPDATA_GUARD_DATA="$T/sl" sh sysext/appdata-guard.sh "$T/sl/AppData/cron" 2>&1); rc=$?
   case "$rc:$(stat -c %u "$T/s"):$out" in 1:4242:*) ok=$((ok + 1)); echo "ok   root: /DATA als Symlink verweigert, nicht repariert" ;; *) echo "FAIL root Symlink: rc=$rc $(stat -c %u "$T/s") $out"; F=$((F + 1)) ;; esac
+  # Symlink eines anderen: sein Eigentuemer biegt ihn nach der Pruefung um
+  mkdir -p "$T/u/real/AppData" "$T/u/DATA" && chmod 755 "$T/u" "$T/u/real" "$T/u/real/AppData" "$T/u/DATA"
+  ln -s "$T/u/real/AppData" "$T/u/DATA/AppData" && chown -h 4242 "$T/u/DATA/AppData"
+  out=$(APPDATA_GUARD_UID=0 APPDATA_GUARD_PATH_UID=0 sh sysext/appdata-guard.sh "$T/u/DATA/AppData/x" 2>&1); rc=$?
+  case "$rc:$out" in 1:*"Symlink von uid 4242"*) ok=$((ok + 1)); echo "ok   root: Elternordner-Symlink eines anderen verweigert" ;; *) echo "FAIL root fremder Symlink: rc=$rc $out"; F=$((F + 1)) ;; esac
+  ln -s "$T/u/real" "$T/u/vorfahr" && chown -h 4242 "$T/u/vorfahr"
+  out=$(APPDATA_GUARD_UID=0 APPDATA_GUARD_PATH_UID=0 sh sysext/appdata-guard.sh "$T/u/vorfahr/AppData/x" 2>&1); rc=$?
+  case "$rc:$out" in 1:*"Symlink von uid 4242"*) ok=$((ok + 1)); echo "ok   root: Vorfahr-Symlink eines anderen verweigert" ;; *) echo "FAIL root fremder Vorfahr-Symlink: rc=$rc $out"; F=$((F + 1)) ;; esac
 else
-  echo "--   3 Faelle mit echtem chown uebersprungen (nicht root)"
+  echo "--   5 Faelle mit echtem chown uebersprungen (nicht root)"
 fi
 if [ $F = 0 ]; then echo "✓ appdata-guard: $ok Faelle"; else echo "✗ appdata-guard: $F Fehler"; fi
 exit $F

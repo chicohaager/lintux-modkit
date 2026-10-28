@@ -292,3 +292,66 @@ func TestSecureFollowsOneSymlinkToARealPath(t *testing.T) {
 		}
 	})
 }
+
+// Repeated and trailing slashes in a link target do not count as further symlinks; a
+// setgid parent keeps setgid when Secure adds the sticky bit (the shell guard's chmod +t does).
+func TestSecureSlashesInTargetsAndSetgid(t *testing.T) {
+	root := tmp(t)
+	for _, p := range []string{"disk", "disk/AppData", "DATA"} {
+		if err := os.Mkdir(filepath.Join(root, p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Join(root, "disk", "AppData")+"/", filepath.Join(root, "DATA", "AppData")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(root+"//disk//AppData", filepath.Join(root, "DATA", "double")); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{"AppData/tailscale", "double/cron"} {
+		if err := Secure(filepath.Join(root, "DATA", dir)); err != nil {
+			t.Fatalf("%s: %v", dir, err)
+		}
+	}
+	sg := filepath.Join(root, "sg")
+	if err := os.Mkdir(sg, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(sg, 0o777|os.ModeSetgid); err != nil {
+		t.Fatal(err)
+	}
+	if err := Secure(filepath.Join(sg, "x")); err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Stat(sg); fi.Mode()&os.ModeSetgid == 0 || fi.Mode()&os.ModeSticky == 0 {
+		t.Fatalf("parent %v: want setgid and sticky", fi.Mode())
+	}
+}
+
+// A symlink of another user is not followed: its owner points it elsewhere after the
+// check. Needs root (Lchown); runs on the host, skipped in CI.
+func TestSecureRefusesASymlinkOfAnotherUser(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("needs root for Lchown")
+	}
+	root := tmp(t)
+	for _, p := range []string{"real", "real/AppData", "DATA"} {
+		if err := os.Mkdir(filepath.Join(root, p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, l := range [][2]string{{"real/AppData", "DATA/AppData"}, {"real", "ancestor"}} {
+		at := filepath.Join(root, l[1])
+		if err := os.Symlink(filepath.Join(root, l[0]), at); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Lchown(at, 4242, 4242); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, dir := range []string{"DATA/AppData/x", "ancestor/AppData/x"} {
+		if err := Secure(filepath.Join(root, dir)); err == nil || !strings.Contains(err.Error(), "symlink of uid 4242") {
+			t.Fatalf("%s: err %v", dir, err)
+		}
+	}
+}
