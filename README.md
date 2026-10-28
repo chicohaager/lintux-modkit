@@ -4,7 +4,7 @@ Shared Go packages for the Lintux modules for ZimaOS (ZFW, Cron, Sync & Backup),
 
 | Package | What |
 |---|---|
-| `appdata` | `appdata.Secure(dir)` before a root daemon reads its directory under `/DATA/AppData`: that directory is 0777 without sticky bit on ZimaOS 1.8 (anyone who writes there swaps a module's folder); sets the sticky bit, refuses a symlinked, foreign or others-writable folder. `sysext/appdata-guard.sh <dir>` does the same for units systemd starts with a file from there (ExecStartPre) |
+| `appdata` | `appdata.Secure(dir)` before a root daemon reads its directory under `/DATA/AppData`: that directory is 0777 without sticky bit on ZimaOS 1.8 (anyone who writes there swaps a module's folder); sets the sticky bit, gives `/DATA` back to root when another user owns it (logged with the way back; that owner could rename `/DATA/AppData`), refuses a symlinked, foreign or others-writable folder. `sysext/appdata-guard.sh <dir>` does the same for units systemd starts with a file from there (ExecStartPre) |
 | `auth` | ZimaOS session-token verifier (ES256 against the platform JWKS, found through `user-service.url`, which only root writes — the gateway route table only on systems without that file: a process without root can change the table), HTTP middleware; only a session with role `admin` passes, any other role gets 403 `auth_forbidden` |
 | `notify` | Webhook (generic, n8n, Discord, Slack, Home Assistant, Uptime Kuma), e-mail and Telegram delivery |
 | `schedule` | 5-field cron validation and next-run computation with one shared alias table |
