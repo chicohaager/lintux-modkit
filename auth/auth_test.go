@@ -248,7 +248,7 @@ func TestJWKSResolver(t *testing.T) {
 }
 
 // The route table is no trust anchor: on ZimaOS 1.8 a process without root
-// upserts a route without login (measured on .184, 2026-10-26: POST
+// upserts a route without login (measured on the second test NAS, 2026-10-26: POST
 // /v1/gateway/routes as uid 999 → 201), so it could point /.well-known/jwks.json
 // at its own keys. user-service.url is written by root, mode 0600 (measured): when
 // it is there, the JWKS comes from it, whatever the table says.
