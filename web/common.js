@@ -68,6 +68,7 @@ function setStatus(msg, kind) {
 
 function describe(err) {
   if (err instanceof ApiError && err.status === 401) return 'Session expired — reload the ZimaOS page and sign in again.';
+  if (err instanceof ApiError && err.status === 403 && err.code === 'auth_forbidden') return 'Only the ZimaOS administrator may use this module. Sign in with the main account.';
   return err.message || String(err);
 }
 

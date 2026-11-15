@@ -38,6 +38,8 @@ jobs:
         run: sh tools/test-hosttest-lib.sh
       - name: tile helper (web/common.js zfw)
         run: node tools/test-web-zfw.mjs
+      - name: tile helper (web/common.js describe)
+        run: node tools/test-web-common.mjs
   go:
     runs-on: ubuntu-latest
     steps:
