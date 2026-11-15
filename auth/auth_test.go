@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -19,11 +20,18 @@ import (
 	"time"
 )
 
-// signES256 builds a minimal ES256 JWT signed with key and carrying iss.
+// signES256 builds a minimal ES256 JWT signed with key, carrying iss and the
+// administrator role of the ZimaOS main account.
 func signES256(t *testing.T, key *ecdsa.PrivateKey, exp int64, iss string) string {
 	t.Helper()
+	return signClaims(t, key, `{"iss":"`+iss+`","exp":`+strconv.FormatInt(exp, 10)+`,"role":"admin"}`)
+}
+
+// signClaims signs an arbitrary JSON payload.
+func signClaims(t *testing.T, key *ecdsa.PrivateKey, claims string) string {
+	t.Helper()
 	hdr := b64.EncodeToString([]byte(`{"alg":"ES256","typ":"JWT"}`))
-	payload := b64.EncodeToString([]byte(`{"iss":"` + iss + `","exp":` + strconv.FormatInt(exp, 10) + `}`))
+	payload := b64.EncodeToString([]byte(claims))
 	signingInput := hdr + "." + payload
 	digest := sha256.Sum256([]byte(signingInput))
 	r, s, err := ecdsa.Sign(rand.Reader, key, digest[:])
@@ -325,5 +333,45 @@ func TestVerifyRefreshesKeysOnRotation(t *testing.T) {
 	}
 	if err := v.Verify(signES256(t, oldKey, time.Now().Add(time.Hour).Unix(), "zimaos")); err == nil {
 		t.Fatal("the old key must be gone after the refresh")
+	}
+}
+
+func TestVerifyRequiresTheAdminRole(t *testing.T) {
+	key, v := newKeyAndServer(t)
+	exp := strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10)
+	for name, claims := range map[string]string{
+		"member":       `{"iss":"zimaos","exp":` + exp + `,"role":"member"}`,
+		"user":         `{"iss":"zimaos","exp":` + exp + `,"role":"user"}`,
+		"no role":      `{"iss":"zimaos","exp":` + exp + `}`,
+		"empty role":   `{"iss":"zimaos","exp":` + exp + `,"role":""}`,
+		"upper case":   `{"iss":"zimaos","exp":` + exp + `,"role":"Admin"}`,
+		"role as list": `{"iss":"zimaos","exp":` + exp + `,"role":["admin"]}`,
+	} {
+		err := v.Verify(signClaims(t, key, claims))
+		if !errors.Is(err, ErrNotAdmin) {
+			t.Errorf("%s: err = %v, want ErrNotAdmin", name, err)
+		}
+	}
+	if err := v.Verify(signClaims(t, key, `{"iss":"zimaos","exp":`+exp+`,"role":"admin"}`)); err != nil {
+		t.Fatalf("admin rejected: %v", err)
+	}
+}
+
+func TestMiddlewareAnswers403ForANonAdminSession(t *testing.T) {
+	key, v := newKeyAndServer(t)
+	exp := strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10)
+	h := v.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("handler reached by a non-admin session")
+	}))
+	req := httptest.NewRequest("GET", "/x", nil)
+	req.Header.Set("Authorization", "Bearer "+signClaims(t, key, `{"iss":"zimaos","exp":`+exp+`,"role":"member"}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status %d, want 403", rec.Code)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body["code"] != "auth_forbidden" {
+		t.Fatalf("body %q (%v), want code auth_forbidden", rec.Body.String(), err)
 	}
 }
