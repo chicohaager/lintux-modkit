@@ -2,10 +2,12 @@ package webmod
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -181,5 +183,53 @@ func TestHealthReusesTheHashWithinTheTTL(t *testing.T) {
 	b.hashed = time.Now().Add(-2 * time.Hour)
 	if s := b.state("x"); s != "replaced" {
 		t.Fatalf("after the TTL: %s", s)
+	}
+}
+
+func bodyServer(t *testing.T, max int64) *httptest.Server {
+	t.Helper()
+	o := Options{Name: "demo", Service: "demo-web", Route: "/demo", MaxBody: max,
+		API: func(verify func(http.Handler) http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				b, err := io.ReadAll(r.Body)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusRequestEntityTooLarge)
+					return
+				}
+				_, _ = w.Write([]byte(strconv.Itoa(len(b))))
+			})
+		}}
+	s := httptest.NewServer(Server(o, func(h http.Handler) http.Handler { return h }, t.TempDir()))
+	t.Cleanup(s.Close)
+	return s
+}
+
+func postSize(t *testing.T, s *httptest.Server, n int) int {
+	t.Helper()
+	res, err := http.Post(s.URL+"/demo/up", "text/plain", strings.NewReader(strings.Repeat("x", n)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	return res.StatusCode
+}
+
+func TestServerKeepsTheDefaultBodyCap(t *testing.T) {
+	s := bodyServer(t, 0)
+	if c := postSize(t, s, 1<<20); c != http.StatusOK {
+		t.Fatalf("1 MiB body: %d, want 200", c)
+	}
+	if c := postSize(t, s, 1<<20+1); c != http.StatusRequestEntityTooLarge {
+		t.Fatalf("1 MiB + 1 body without MaxBody: %d, want 413", c)
+	}
+}
+
+func TestServerTakesALargerMaxBody(t *testing.T) {
+	s := bodyServer(t, 4<<20)
+	if c := postSize(t, s, 3<<20); c != http.StatusOK {
+		t.Fatalf("3 MiB body with MaxBody 4 MiB: %d, want 200", c)
+	}
+	if c := postSize(t, s, 4<<20+1); c != http.StatusRequestEntityTooLarge {
+		t.Fatalf("4 MiB + 1 body: %d, want 413", c)
 	}
 }
