@@ -63,6 +63,10 @@ type Options struct {
 	// API builds the API handler. verify wraps a handler with the session
 	// token check; <Route>/health is served by webmod without it.
 	API func(verify func(http.Handler) http.Handler) http.Handler
+	// MaxBody caps the body of POST and PUT requests in bytes; 0 keeps
+	// httpx.DefaultMaxBody (1 MiB). A module that takes whole files (an editor)
+	// raises it; a larger body is answered with 413 by the handler's read.
+	MaxBody int64
 }
 
 // selfExe is the running program, binaryTTL how long a file hash is reused;
@@ -148,6 +152,12 @@ func Handler(o Options, verify func(http.Handler) http.Handler, staticDir string
 	return httpx.Static("/modules/"+o.Name+"/", staticDir, httpx.CSRF(mux))
 }
 
+// Server is Handler with request logging and the body cap of o.MaxBody — the
+// handler Run serves. Exported for tests and development servers.
+func Server(o Options, verify func(http.Handler) http.Handler, staticDir string) http.Handler {
+	return httpx.Logging(o.Service, o.MaxBody)(Handler(o, verify, staticDir))
+}
+
 // Run serves the module until SIGTERM. The environment switches
 // <SERVICE>_DISABLE_AUTH=1 and <SERVICE>_STATIC_DIR exist for development;
 // the shipped unit sets neither.
@@ -188,7 +198,7 @@ func Run(o Options) {
 	go registerRoute(o, runtimePath, "http://"+listener.Addr().String())
 
 	srv := &http.Server{
-		Handler:           httpx.Logging(o.Service, 1<<20)(Handler(o, verifier.Middleware, staticDir)),
+		Handler:           Server(o, verifier.Middleware, staticDir),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {
