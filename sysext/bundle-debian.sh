@@ -28,14 +28,14 @@ case "$NAME" in *[!a-z0-9_-]*|"") echo "ungueltiger Name: $NAME" >&2; exit 2 ;; 
 case "$ARCH" in amd64|arm64) ;; *) echo "Architektur $ARCH nicht unterstuetzt" >&2; exit 2 ;; esac
 for p in "$@"; do case "$p" in /*) ;; *) echo "kein absoluter Pfad: $p" >&2; exit 2 ;; esac; done
 
-# Festgenagelt per Digest (Index-Digest von debian:trixie, gezogen 2026-10-23), damit ein
+# Festgenagelt per Digest (Index-Digest von debian:trixie 13.7, gezogen 2026-11-16), damit ein
 # spaeterer Bau nicht still eine andere Basis nimmt. Neuer Stand: Digest bewusst anheben.
-IMAGE="${DEBIAN_IMAGE:-debian:trixie@sha256:4c25275446ca371766b8b093c696782eabce06263fccacb8d5d813b3dc44b308}"
+IMAGE="${DEBIAN_IMAGE:-debian:trixie@sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6}"
 GLIBC_MAX="${GLIBC_MAX:-2.41}"
 # Pakete aus dem Debian-Schnappschuss vom Stand des Images (steht in dessen debian.sources), nicht
 # vom laufenden Spiegel: sonst holt ein spaeterer Bau andere Paketversionen und das Abbild weicht ab
 # (gemessen 2026-10-23: zwei Bauten am selben Tag gleich, aber apt-get update gegen deb.debian.org).
-DEBIAN_SNAPSHOT="${DEBIAN_SNAPSHOT:-20261020T213255Z}"
+DEBIAN_SNAPSHOT="${DEBIAN_SNAPSHOT:-20261116T155657Z}"
 # Der feste Stand haelt auch Sicherheits-Updates fern (Rueckmeldung 25.10.2026). Darum prueft jeder Bau
 # die mitgelieferten Pakete gegen den laufenden Spiegel und bricht ab, wenn dort eines neuer ist:
 # DEBIAN_SNAPSHOT anheben. Nur wer bewusst einen alten Stand nachbaut, setzt DEBIAN_SNAPSHOT_ALLOW_OLD=1.
@@ -58,6 +58,10 @@ S=/etc/apt/sources.list.d/debian.sources
 sed -i -E "s#^URIs: http://deb\.debian\.org/(debian(-security)?)\$#URIs: http://snapshot.debian.org/archive/\\1/$DEBIAN_SNAPSHOT#" "$S"
 [ "$(grep -c "^URIs: http://snapshot.debian.org/archive/.*/$DEBIAN_SNAPSHOT\$" "$S")" -eq 2 ] || { echo "Schnappschuss nicht eingetragen: $S" >&2; cat "$S" >&2; exit 1; }
 apt-get -o Acquire::Check-Valid-Until=false update -qq >/dev/null
+# Was das Image schon mitbringt (zlib1g, libc6 …), kommt sonst in der Fassung des Images ins Abbild,
+# nicht in der des Schnappschusses: 16.11.2026 blieb zlib1g auf +b1, obwohl der Schnappschuss +deb13u1
+# hatte, und die Pruefung unten brach jeden Bau ab. Darum zuerst alles auf den Schnappschuss heben.
+apt-get -y -qq upgrade >/dev/null
 # shellcheck disable=SC2086
 apt-get install -y -qq --no-install-recommends binutils patchelf file $PKGS >/dev/null
 L=/out/usr/lib/$NAME
