@@ -58,11 +58,11 @@ S=/etc/apt/sources.list.d/debian.sources
 sed -i -E "s#^URIs: http://deb\.debian\.org/(debian(-security)?)\$#URIs: http://snapshot.debian.org/archive/\\1/$DEBIAN_SNAPSHOT#" "$S"
 [ "$(grep -c "^URIs: http://snapshot.debian.org/archive/.*/$DEBIAN_SNAPSHOT\$" "$S")" -eq 2 ] || { echo "Schnappschuss nicht eingetragen: $S" >&2; cat "$S" >&2; exit 1; }
 apt-get -o Acquire::Check-Valid-Until=false update -qq >/dev/null
-# shellcheck disable=SC2086
 # Was das Image schon mitbringt (zlib1g, libc6 …), kommt sonst in der Fassung des Images ins Abbild,
 # nicht in der des Schnappschusses: 16.11.2026 blieb zlib1g auf +b1, obwohl der Schnappschuss +deb13u1
 # hatte, und die Pruefung unten brach jeden Bau ab. Darum zuerst alles auf den Schnappschuss heben.
 apt-get -y -qq upgrade >/dev/null
+# shellcheck disable=SC2086
 apt-get install -y -qq --no-install-recommends binutils patchelf file $PKGS >/dev/null
 L=/out/usr/lib/$NAME
 D=/out/usr/share/doc/$NAME
