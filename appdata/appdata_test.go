@@ -1,8 +1,11 @@
 package appdata
 
 import (
+	"errors"
+	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -110,4 +113,245 @@ func TestSecureRefusesWhatRootMustNotTrust(t *testing.T) {
 			t.Fatalf("err %v, want it to name %s", err, top)
 		}
 	})
+}
+
+// /DATA owned by the login user (uid 999 on the test NAS, 2026-10-28) stopped every module
+// with this guard. Secure gives exactly /DATA back to root and logs it; nothing else
+// is changed. The tests do not run as root: chown is replaced, and "root" is this
+// test's user once the fake chown has run.
+func TestSecureGivesDataBackToRoot(t *testing.T) {
+	self := os.Geteuid()
+	type call struct {
+		path     string
+		uid, gid int
+	}
+	setup := func(t *testing.T, mode os.FileMode, chownErr error) (data, dir string, calls *[]call, logged *strings.Builder) {
+		data = tmp(t)
+		if err := os.Chmod(data, mode); err != nil {
+			t.Fatal(err)
+		}
+		parent := filepath.Join(data, "AppData")
+		if err := os.Mkdir(parent, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		repaired := false
+		calls = &[]call{}
+		owner, root, ch := trusted, dataRoot, chown
+		trusted = func(uid int) bool { return uid == 0 || (repaired && uid == self) }
+		dataRoot = data
+		chown = func(p string, u, g int) error {
+			*calls = append(*calls, call{p, u, g})
+			if chownErr != nil {
+				return chownErr
+			}
+			repaired = true
+			return nil
+		}
+		logged = &strings.Builder{}
+		log.SetOutput(logged)
+		t.Cleanup(func() { trusted, dataRoot, chown = owner, root, ch; log.SetOutput(os.Stderr) })
+		return data, filepath.Join(parent, "cron"), calls, logged
+	}
+	t.Run("repaired and logged", func(t *testing.T) {
+		data, dir, calls, logged := setup(t, 0o755, nil)
+		if err := Secure(dir); err != nil {
+			t.Fatal(err)
+		}
+		if len(*calls) != 1 || (*calls)[0] != (call{data, 0, 0}) {
+			t.Fatalf("chown calls %v, want one on %s", *calls, data)
+		}
+		want := data + " belonged to uid " + strconv.Itoa(self)
+		if !strings.Contains(logged.String(), want) || !strings.Contains(logged.String(), "owner set to root (back: chown "+strconv.Itoa(self)+":") {
+			t.Fatalf("log %q, want %q and the way back", logged.String(), want)
+		}
+		if fi, _ := os.Stat(data); fi.Mode().Perm() != 0o755 {
+			t.Fatalf("mode of %s changed to %v", data, fi.Mode())
+		}
+	})
+	t.Run("another ancestor is not repaired", func(t *testing.T) {
+		_, dir, calls, _ := setup(t, 0o755, nil)
+		dataRoot = "/DATA-not-on-this-path"
+		if err := Secure(dir); err == nil || !strings.Contains(err.Error(), "lets others change the path") {
+			t.Fatalf("err %v", err)
+		}
+		if len(*calls) != 0 {
+			t.Fatalf("chown calls %v", *calls)
+		}
+	})
+	t.Run("symlinked /DATA is refused, not repaired", func(t *testing.T) {
+		data, _, calls, _ := setup(t, 0o755, nil)
+		link := filepath.Join(tmp(t), "DATA")
+		if err := os.Symlink(data, link); err != nil {
+			t.Fatal(err)
+		}
+		dataRoot = link
+		err := Secure(filepath.Join(link, "AppData", "cron"))
+		if len(*calls) != 0 {
+			t.Fatalf("chown calls %v on a symlink", *calls)
+		}
+		if err == nil || !strings.Contains(err.Error(), link+" (mode") {
+			t.Fatalf("err %v, want %s refused", err, link)
+		}
+	})
+	t.Run("chown fails", func(t *testing.T) {
+		data, dir, _, _ := setup(t, 0o755, errors.New("operation not permitted"))
+		if err := Secure(dir); err == nil || !strings.Contains(err.Error(), data+" belongs to uid") || !strings.Contains(err.Error(), "owner root not set") {
+			t.Fatalf("err %v", err)
+		}
+	})
+	t.Run("unsafe mode stays refused after the repair", func(t *testing.T) {
+		data, dir, calls, _ := setup(t, 0o777, nil)
+		if err := Secure(dir); err == nil || !strings.Contains(err.Error(), data+" (mode") {
+			t.Fatalf("err %v, want %s refused for its mode", err, data)
+		}
+		if len(*calls) != 1 {
+			t.Fatalf("chown calls %v", *calls)
+		}
+	})
+}
+
+// Forum 9566: /DATA/AppData was a symlink and the guard refused it ("not a plain
+// directory"); striking the symlink test left the target's path unchecked. Secure
+// follows one step to a real path and checks that path up to / — and the path behind
+// a symlinked ancestor, which it did not check before.
+func TestSecureFollowsOneSymlinkToARealPath(t *testing.T) {
+	mkdir := func(t *testing.T, p string, mode os.FileMode) {
+		if err := os.Mkdir(p, mode); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(p, mode); err != nil { // past the umask
+			t.Fatal(err)
+		}
+	}
+	link := func(t *testing.T, to, at string) {
+		if err := os.Symlink(to, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	refused := func(t *testing.T, dir, want string) {
+		t.Helper()
+		if err := Secure(dir); err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("err %v, want %q", err, want)
+		}
+	}
+	t.Run("parent symlink to a safe path is followed", func(t *testing.T) {
+		root := tmp(t)
+		mkdir(t, filepath.Join(root, "disk"), 0o755)
+		mkdir(t, filepath.Join(root, "disk", "AppData"), 0o777)
+		mkdir(t, filepath.Join(root, "DATA"), 0o755)
+		link(t, filepath.Join(root, "disk", "AppData"), filepath.Join(root, "DATA", "AppData"))
+		if err := Secure(filepath.Join(root, "DATA", "AppData", "tailscale")); err != nil {
+			t.Fatal(err)
+		}
+		if fi, _ := os.Stat(filepath.Join(root, "disk", "AppData")); fi.Mode()&os.ModeSticky == 0 {
+			t.Fatalf("target %v: no sticky bit", fi.Mode())
+		}
+		if fi, err := os.Lstat(filepath.Join(root, "disk", "AppData", "tailscale")); err != nil || fi.Mode().Perm() != 0o700 {
+			t.Fatalf("dir %v %v", fi, err)
+		}
+	})
+	t.Run("parent symlink to a path under 0777 is refused, nothing created", func(t *testing.T) {
+		root := tmp(t)
+		open := filepath.Join(root, "open")
+		mkdir(t, open, 0o777)
+		mkdir(t, filepath.Join(open, "AppData"), 0o755)
+		mkdir(t, filepath.Join(root, "DATA"), 0o755)
+		link(t, filepath.Join(open, "AppData"), filepath.Join(root, "DATA", "AppData"))
+		refused(t, filepath.Join(root, "DATA", "AppData", "tailscale"), open+" (mode")
+		if _, err := os.Lstat(filepath.Join(open, "AppData", "tailscale")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("created: %v", err)
+		}
+	})
+	t.Run("symlink to a symlink, dangling, missing, a file", func(t *testing.T) {
+		root := tmp(t)
+		mkdir(t, filepath.Join(root, "real"), 0o755)
+		link(t, filepath.Join(root, "real"), filepath.Join(root, "one"))
+		link(t, filepath.Join(root, "one"), filepath.Join(root, "two"))
+		refused(t, filepath.Join(root, "two", "x"), "only a symlink to a real path")
+		link(t, filepath.Join(root, "nothing"), filepath.Join(root, "dead"))
+		refused(t, filepath.Join(root, "dead", "x"), "which is missing")
+		refused(t, filepath.Join(root, "absent", "x"), root+"/absent is missing")
+		if err := os.WriteFile(filepath.Join(root, "file"), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		refused(t, filepath.Join(root, "file", "x"), "is not a directory")
+	})
+	t.Run("ancestor symlink: the path behind it is checked", func(t *testing.T) {
+		root := tmp(t)
+		open := filepath.Join(root, "open")
+		mkdir(t, open, 0o777)
+		mkdir(t, filepath.Join(open, "sub"), 0o755)
+		mkdir(t, filepath.Join(open, "sub", "AppData"), 0o755)
+		link(t, filepath.Join(open, "sub"), filepath.Join(root, "bad"))
+		refused(t, filepath.Join(root, "bad", "AppData", "x"), open+" (mode")
+		mkdir(t, filepath.Join(root, "safe"), 0o755)
+		mkdir(t, filepath.Join(root, "safe", "AppData"), 0o755)
+		link(t, filepath.Join(root, "safe"), filepath.Join(root, "good"))
+		if err := Secure(filepath.Join(root, "good", "AppData", "nebula")); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+// Repeated and trailing slashes in a link target do not count as further symlinks; a
+// setgid parent keeps setgid when Secure adds the sticky bit (the shell guard's chmod +t does).
+func TestSecureSlashesInTargetsAndSetgid(t *testing.T) {
+	root := tmp(t)
+	for _, p := range []string{"disk", "disk/AppData", "DATA"} {
+		if err := os.Mkdir(filepath.Join(root, p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Join(root, "disk", "AppData")+"/", filepath.Join(root, "DATA", "AppData")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(root+"//disk//AppData", filepath.Join(root, "DATA", "double")); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{"AppData/tailscale", "double/cron"} {
+		if err := Secure(filepath.Join(root, "DATA", dir)); err != nil {
+			t.Fatalf("%s: %v", dir, err)
+		}
+	}
+	sg := filepath.Join(root, "sg")
+	if err := os.Mkdir(sg, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(sg, 0o777|os.ModeSetgid); err != nil {
+		t.Fatal(err)
+	}
+	if err := Secure(filepath.Join(sg, "x")); err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Stat(sg); fi.Mode()&os.ModeSetgid == 0 || fi.Mode()&os.ModeSticky == 0 {
+		t.Fatalf("parent %v: want setgid and sticky", fi.Mode())
+	}
+}
+
+// A symlink of another user is not followed: its owner points it elsewhere after the
+// check. Needs root (Lchown); runs on the host, skipped in CI.
+func TestSecureRefusesASymlinkOfAnotherUser(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("needs root for Lchown")
+	}
+	root := tmp(t)
+	for _, p := range []string{"real", "real/AppData", "DATA"} {
+		if err := os.Mkdir(filepath.Join(root, p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, l := range [][2]string{{"real/AppData", "DATA/AppData"}, {"real", "ancestor"}} {
+		at := filepath.Join(root, l[1])
+		if err := os.Symlink(filepath.Join(root, l[0]), at); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Lchown(at, 4242, 4242); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, dir := range []string{"DATA/AppData/x", "ancestor/AppData/x"} {
+		if err := Secure(filepath.Join(root, dir)); err == nil || !strings.Contains(err.Error(), "symlink of uid 4242") {
+			t.Fatalf("%s: err %v", dir, err)
+		}
+	}
 }

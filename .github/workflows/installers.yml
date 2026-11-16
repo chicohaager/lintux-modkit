@@ -17,7 +17,7 @@ jobs:
           sudo install -m 0755 /tmp/shellcheck-v0.11.0/shellcheck /usr/local/bin/shellcheck
           shellcheck --version
       - name: shellcheck
-        run: shellcheck -x install.sh install-with-firewall.sh install-without-firewall.sh tools/gen-installers.sh tools/test-semver.sh tools/test-tailnet.sh tools/test-decisions.sh tools/test-sysext.sh sysext/build-sysext.sh sysext/lint-units.sh sysext/uninstall-watchdog.sh sysext/unit-watchdog.sh sysext/bundle-debian.sh tools/test-unit-watchdog.sh sysext/add-web.sh sysext/appdata-guard.sh tools/test-appdata-guard.sh tools/find-consumers.sh tools/test-find-consumers.sh
+        run: shellcheck -x install.sh install-with-firewall.sh install-without-firewall.sh tools/gen-installers.sh tools/test-semver.sh tools/test-tailnet.sh tools/test-decisions.sh tools/test-sysext.sh sysext/build-sysext.sh sysext/lint-units.sh sysext/uninstall-watchdog.sh sysext/unit-watchdog.sh sysext/bundle-debian.sh tools/test-unit-watchdog.sh sysext/add-web.sh sysext/appdata-guard.sh tools/test-appdata-guard.sh tools/find-consumers.sh tools/test-find-consumers.sh sysext/modkit-check.sh sysext/test-modkit-check.sh tools/modkit-pins.sh tools/test-modkit-pins.sh
       - name: shellcheck (host-test helper, POSIX sh)
         run: shellcheck -S warning -s sh tools/hosttest-lib.sh tools/test-hosttest-lib.sh
       - name: version comparison (semver_lt)
@@ -53,3 +53,5 @@ jobs:
         run: go vet ./...
       - name: go test (auth, gateway, httpx, watchdog, webmod, …)
         run: go test -race -count=1 ./...
+      - name: modkit pin check and its copies (modkit-check.sh, modkit-pins.sh; needs go list)
+        run: bash tools/test-modkit-pins.sh
