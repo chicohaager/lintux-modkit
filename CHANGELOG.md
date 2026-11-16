@@ -4,6 +4,29 @@ Modules pin lintux-modkit by tag and commit (`lintux-modkit.ref`, `<tag> <commit
 Before raising a pin, read the **Breaking** lines of every version in between.
 `tools/find-consumers.sh` lists the public repositories that use lintux-modkit and the version each pins.
 
+## v0.1.6 — 2026-11-16
+
+**Breaking**
+
+- `appdata.Secure` and `sysext/appdata-guard.sh` follow a symlink on the way only when root owns it, and then check
+  the path behind it up to `/`. Before, a symlinked ancestor was passed through `stat` without asking who owns the
+  link or what lies behind it. A path whose ancestor is a symlink of another user, or points under an unsafe
+  directory, is now refused; a module on such a path stops with a message naming the link.
+
+Other changes
+
+- `appdata`: `/DATA` owned by another user (uid 999, the login user, on a ZimaOS 1.8 box) is given back to root
+  instead of refused; the mode stays, the log names the old owner and the way back (`chown <uid>:<gid> /DATA`).
+  A symlinked `/DATA` and an unsafe mode are still refused. Before, every module with the guard stopped on such a box.
+- `appdata`: a symlinked parent (`/DATA/AppData` moved to another disk) is followed one step to a real path instead
+  of refused as "not a real directory"; "missing" and "not a directory" are told apart. Repeated and trailing slashes
+  in a link target do not count as further symlinks; `.` and `..` still do.
+- `appdata`: adding the sticky bit keeps setgid/setuid (as `chmod +t`).
+- `sysext/modkit-check.sh` and `tools/modkit-pins.sh`: the modules' pin check lives here; a module's copy is checked
+  against it, and `tools/modkit-pins.sh` sets a pin in one step.
+- No other API change; moving from v0.1.5 needs nothing else unless a module runs from a path with a symlink of
+  another user.
+
 ## v0.1.5 — 2026-11-16
 
 Other changes
