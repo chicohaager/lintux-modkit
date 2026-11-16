@@ -4,6 +4,18 @@ Modules pin lintux-modkit by tag and commit (`lintux-modkit.ref`, `<tag> <commit
 Before raising a pin, read the **Breaking** lines of every version in between.
 `tools/find-consumers.sh` lists the public repositories that use lintux-modkit and the version each pins.
 
+## v0.1.5 — 2026-11-16
+
+Other changes
+
+- `sysext/bundle-debian.sh`: Debian snapshot `20261116T155657Z` (was `20261020T213255Z`) and `debian:trixie` 13.7
+  (index digest `sha256:9c6e3814…`, was `4c252754…`). With the old snapshot every build stopped with rc=3, because the
+  live mirror had a security update (`zlib1g 1:1.3.dfsg+really1.3.1-1+deb13u1`).
+- `sysext/bundle-debian.sh`: upgrades the packages the image already has to the snapshot before installing. Before,
+  a package that came with the image (here `zlib1g`) stayed at the image's version whatever the snapshot, so a newer
+  snapshot could not clear the stale-package stop.
+- No API change; moving from v0.1.4 needs nothing else.
+
 ## v0.1.4 — 2026-11-15
 
 **Breaking**
