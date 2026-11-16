@@ -115,7 +115,7 @@ func TestSecureRefusesWhatRootMustNotTrust(t *testing.T) {
 	})
 }
 
-// /DATA owned by the login user (uid 999 on nas-main, 2026-10-28) stopped every module
+// /DATA owned by the login user (uid 999 on the test NAS, 2026-10-28) stopped every module
 // with this guard. Secure gives exactly /DATA back to root and logs it; nothing else
 // is changed. The tests do not run as root: chown is replaced, and "root" is this
 // test's user once the fake chown has run.
