@@ -3,7 +3,8 @@
 // issues ES256 JWTs (the web UI keeps one in localStorage.access_token); the
 // gateway proxies module routes without checking them, so every module has
 // to verify the token itself. This package checks the signature against the
-// platform JWKS, the validity window, the issuer and the administrator role.
+// platform JWKS, the validity window, the issuer and the role: Middleware
+// admits the administrator only, MemberMiddleware every ZimaOS account.
 //
 // It originated in ZFW (github.com/chicohaager/zfw) and moved to cron; the
 // measurements of the ZimaOS token format are recorded in the comments.
@@ -74,6 +75,43 @@ var sessionIssuers = []string{"casaos", "zimaos"}
 var ErrNotAdmin = errors.New("session role is not admin")
 
 const adminRole = "admin"
+
+// ErrNotMember is returned for a valid token that names no ZimaOS account:
+// a role other than "admin" or "user", or no username.
+var ErrNotMember = errors.New("session is not a ZimaOS account")
+
+// memberRoles are the roles of ZimaOS accounts. Measured 2026-11-20 on a
+// ZimaBoard 2 with ZimaOS 1.8.0: the main account's token carries
+// {"username","role":"admin","id":1}, a sub-account made in Settings → Users
+// (POST /v2/users/samba/user) carries {"username","role":"user","id":10000}.
+// Any other value is refused: it would be a role this package never saw.
+var memberRoles = []string{adminRole, "user"}
+
+// Session is the ZimaOS account a valid access token belongs to.
+type Session struct {
+	Username string
+	ID       int64
+	Role     string
+}
+
+// Admin reports whether the session is the administrator's.
+func (s Session) Admin() bool { return s.Role == adminRole }
+
+type sessionKey struct{}
+
+// SessionFrom returns the session Middleware or MemberMiddleware stored for
+// the request.
+func SessionFrom(ctx context.Context) (Session, bool) {
+	s, ok := ctx.Value(sessionKey{}).(Session)
+	return s, ok
+}
+
+func withSession(r *http.Request, s Session) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), sessionKey{}, s))
+}
+
+// devSession is what a Disabled verifier hands on (development without ZimaOS).
+var devSession = Session{Username: "dev", ID: 1, Role: adminRole}
 
 func isSessionIssuer(iss string) bool {
 	for _, want := range sessionIssuers {
@@ -349,31 +387,84 @@ func (v *Verifier) refreshedKeys() ([]keyEntry, error) {
 	return v.keys, nil
 }
 
-// Verify checks a raw JWT: ES256 header, r‖s signature over the signing
-// input against a JWKS key (matched by kid when the token names one),
-// accepted issuer, mandatory exp, and nbf with a small skew.
+// Verify checks a raw JWT of the administrator: ES256 header, r‖s signature
+// over the signing input against a JWKS key (matched by kid when the token
+// names one), accepted issuer, mandatory exp, nbf with a small skew, and the
+// role "admin" (anything else is ErrNotAdmin).
 func (v *Verifier) Verify(token string) error {
+	_, err := v.verify(token)
+	return err
+}
+
+// Session checks a raw JWT as Verify does, but lets every ZimaOS account
+// through (role "admin" or "user" and a username) and returns it. Anything
+// else is ErrNotMember.
+func (v *Verifier) Session(token string) (Session, error) {
+	c, err := v.claims(token)
+	if err != nil {
+		return Session{}, err
+	}
+	var role string
+	if json.Unmarshal(c.Role, &role) != nil || !isMemberRole(role) || c.Username == "" {
+		return Session{}, fmt.Errorf("%w (role %.40q)", ErrNotMember, string(c.Role))
+	}
+	return Session{Username: c.Username, ID: c.ID, Role: role}, nil
+}
+
+func isMemberRole(role string) bool {
+	for _, r := range memberRoles {
+		if role == r {
+			return true
+		}
+	}
+	return false
+}
+
+// verify is Verify returning the administrator's session.
+func (v *Verifier) verify(token string) (Session, error) {
+	c, err := v.claims(token)
+	if err != nil {
+		return Session{}, err
+	}
+	var role string
+	if json.Unmarshal(c.Role, &role) != nil || role != adminRole {
+		return Session{}, fmt.Errorf("%w (role %.40q)", ErrNotAdmin, string(c.Role))
+	}
+	return Session{Username: c.Username, ID: c.ID, Role: role}, nil
+}
+
+type tokenClaims struct {
+	Iss      string          `json:"iss"`
+	Exp      int64           `json:"exp"`
+	Nbf      int64           `json:"nbf"`
+	Role     json.RawMessage `json:"role"`
+	Username string          `json:"username"`
+	ID       int64           `json:"id"`
+}
+
+// claims checks everything but the role and returns the payload.
+func (v *Verifier) claims(token string) (tokenClaims, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
-		return errors.New("not a JWT (three segments expected)")
+		return tokenClaims{}, errors.New("not a JWT (three segments expected)")
 	}
 	hdrRaw, err := b64.DecodeString(parts[0])
 	if err != nil {
-		return errors.New("header not decodable")
+		return tokenClaims{}, errors.New("header not decodable")
 	}
 	var hdr struct {
 		Alg string `json:"alg"`
 		Kid string `json:"kid"`
 	}
 	if err := json.Unmarshal(hdrRaw, &hdr); err != nil {
-		return errors.New("header not readable")
+		return tokenClaims{}, errors.New("header not readable")
 	}
 	if hdr.Alg != "ES256" {
-		return fmt.Errorf("alg %q not supported (only ES256)", hdr.Alg)
+		return tokenClaims{}, fmt.Errorf("alg %q not supported (only ES256)", hdr.Alg)
 	}
 	sig, err := b64.DecodeString(parts[2])
 	if err != nil || len(sig) != 64 {
-		return errors.New("signature invalid")
+		return tokenClaims{}, errors.New("signature invalid")
 	}
 	r := new(big.Int).SetBytes(sig[:32])
 	s := new(big.Int).SetBytes(sig[32:])
@@ -381,7 +472,7 @@ func (v *Verifier) Verify(token string) error {
 
 	keys, err := v.currentKeys()
 	if err != nil {
-		return fmt.Errorf("JWKS unavailable: %w", err)
+		return tokenClaims{}, fmt.Errorf("JWKS unavailable: %w", err)
 	}
 	matches := func(keys []keyEntry) bool {
 		for _, k := range keys {
@@ -397,41 +488,32 @@ func (v *Verifier) Verify(token string) error {
 	if !matches(keys) {
 		// the key set may have rotated since it was fetched: refresh once and look again
 		if keys, err = v.refreshedKeys(); err != nil || !matches(keys) {
-			return errors.New("signature matches no JWKS key")
+			return tokenClaims{}, errors.New("signature matches no JWKS key")
 		}
 	}
 
 	plRaw, err := b64.DecodeString(parts[1])
 	if err != nil {
-		return errors.New("payload not decodable")
+		return tokenClaims{}, errors.New("payload not decodable")
 	}
-	var claims struct {
-		Iss  string          `json:"iss"`
-		Exp  int64           `json:"exp"`
-		Nbf  int64           `json:"nbf"`
-		Role json.RawMessage `json:"role"`
-	}
+	var claims tokenClaims
 	if err := json.Unmarshal(plRaw, &claims); err != nil {
-		return errors.New("payload not readable")
+		return tokenClaims{}, errors.New("payload not readable")
 	}
 	if !isSessionIssuer(claims.Iss) {
-		return fmt.Errorf("token issuer %q not accepted (want one of %v)", claims.Iss, sessionIssuers)
+		return tokenClaims{}, fmt.Errorf("token issuer %q not accepted (want one of %v)", claims.Iss, sessionIssuers)
 	}
 	if claims.Exp == 0 {
-		return errors.New("token without expiry (exp)")
+		return tokenClaims{}, errors.New("token without expiry (exp)")
 	}
 	now := time.Now()
 	if now.Unix() >= claims.Exp {
-		return errors.New("token expired")
+		return tokenClaims{}, errors.New("token expired")
 	}
 	if claims.Nbf != 0 && now.Add(clockSkew).Unix() < claims.Nbf {
-		return errors.New("token not yet valid (nbf)")
+		return tokenClaims{}, errors.New("token not yet valid (nbf)")
 	}
-	var role string
-	if json.Unmarshal(claims.Role, &role) != nil || role != adminRole {
-		return fmt.Errorf("%w (role %.40q)", ErrNotAdmin, string(claims.Role))
-	}
-	return nil
+	return claims, nil
 }
 
 // rejectLogInterval is the minimum spacing between two "session rejected"
@@ -490,8 +572,35 @@ func clientAddr(r *http.Request) string {
 // {"error","code"} so the UI can tell an expired session from a missing one;
 // a valid session of another role answers 403 with code "auth_forbidden".
 func (v *Verifier) Middleware(next http.Handler) http.Handler {
+	return v.middleware(next, v.verify, ErrNotAdmin, "only the ZimaOS administrator may use this module")
+}
+
+// MemberMiddleware is Middleware for every ZimaOS account, the
+// administrator's and the sub-accounts' (Session). The handler finds the
+// session with SessionFrom; RequireAdmin closes single routes to anyone but
+// the administrator.
+func (v *Verifier) MemberMiddleware(next http.Handler) http.Handler {
+	return v.middleware(next, v.Session, ErrNotMember, "no ZimaOS account")
+}
+
+// RequireAdmin lets only the administrator's session through (403
+// auth_forbidden otherwise, also without any session in the context). Use it
+// behind MemberMiddleware.
+func RequireAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s, ok := SessionFrom(r.Context()); !ok || !s.Admin() {
+			writeAuthError(w, http.StatusForbidden, "auth_forbidden", "only the ZimaOS administrator may do this")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (v *Verifier) middleware(next http.Handler, check func(string) (Session, error), forbidden error, forbiddenMsg string) http.Handler {
 	if v.disabled {
-		return next
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, withSession(r, devSession))
+		})
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := bearerToken(r)
@@ -500,16 +609,17 @@ func (v *Verifier) Middleware(next http.Handler) http.Handler {
 			unauthorized(w, "auth_required", "authentication required")
 			return
 		}
-		if err := v.Verify(token); err != nil {
+		sess, err := check(token)
+		if err != nil {
 			v.logReject(r, err.Error())
-			if errors.Is(err, ErrNotAdmin) {
-				writeAuthError(w, http.StatusForbidden, "auth_forbidden", "only the ZimaOS administrator may use this module")
+			if errors.Is(err, forbidden) {
+				writeAuthError(w, http.StatusForbidden, "auth_forbidden", forbiddenMsg)
 				return
 			}
 			unauthorized(w, "auth_invalid", "invalid session: "+err.Error())
 			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, withSession(r, sess))
 	})
 }
 

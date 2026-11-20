@@ -233,3 +233,19 @@ func TestServerTakesALargerMaxBody(t *testing.T) {
 		t.Fatalf("4 MiB + 1 body: %d, want 413", c)
 	}
 }
+
+func TestMembersChoosesTheMemberCheck(t *testing.T) {
+	for _, members := range []bool{false, true} {
+		got := ""
+		h := verifyFor(Options{Members: members}, func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { got = "admin-check"; next.ServeHTTP(w, r) })
+		}, func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { got = "member-check"; next.ServeHTTP(w, r) })
+		})(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
+		want := map[bool]string{false: "admin-check", true: "member-check"}[members]
+		if got != want {
+			t.Errorf("Members=%v: %s, want %s", members, got, want)
+		}
+	}
+}
