@@ -63,6 +63,11 @@ type Options struct {
 	// API builds the API handler. verify wraps a handler with the session
 	// token check; <Route>/health is served by webmod without it.
 	API func(verify func(http.Handler) http.Handler) http.Handler
+	// Members lets every ZimaOS account through verify, the sub-accounts
+	// (role "user") as well as the administrator; the handler reads the
+	// account with auth.SessionFrom and closes administrative routes with
+	// auth.RequireAdmin. False (the default) keeps verify to the administrator.
+	Members bool
 	// MaxBody caps the body of POST and PUT requests in bytes; 0 keeps
 	// httpx.DefaultMaxBody (1 MiB). A module that takes whole files (an editor)
 	// raises it; a larger body is answered with 413 by the handler's read.
@@ -198,7 +203,7 @@ func Run(o Options) {
 	go registerRoute(o, runtimePath, "http://"+listener.Addr().String())
 
 	srv := &http.Server{
-		Handler:           Server(o, verifier.Middleware, staticDir),
+		Handler:           Server(o, verifyFor(o, verifier.Middleware, verifier.MemberMiddleware), staticDir),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {
@@ -212,6 +217,14 @@ func Run(o Options) {
 	if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
+}
+
+// verifyFor picks the session check Options.Members asks for.
+func verifyFor(o Options, admin, member func(http.Handler) http.Handler) func(http.Handler) http.Handler {
+	if o.Members {
+		return member
+	}
+	return admin
 }
 
 func registerRoute(o Options, runtimePath, target string) {

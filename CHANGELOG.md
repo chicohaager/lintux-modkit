@@ -4,6 +4,20 @@ Modules pin lintux-modkit by tag and commit (`lintux-modkit.ref`, `<tag> <commit
 Before raising a pin, read the **Breaking** lines of every version in between.
 `tools/find-consumers.sh` lists the public repositories that use lintux-modkit and the version each pins.
 
+## v0.1.7 — 2026-11-20
+
+No breaking change: `Middleware`, `Verify` and webmod without `Members` behave as in v0.1.6.
+
+- `auth`: `Verifier.Session` checks a token like `Verify` but admits every ZimaOS account and returns it
+  (`Session{Username, ID, Role}`). Admitted roles are `admin` (main account) and `user` (sub-accounts), measured
+  on ZimaOS 1.8.0: a sub-account made in Settings → Users logs in with `role: "user"`, `id: 10000`. Any other role,
+  a missing role or a missing username is `ErrNotMember`.
+- `auth`: `MemberMiddleware` is `Middleware` for every account; both now store the session for `SessionFrom`.
+  `RequireAdmin` closes single routes behind `MemberMiddleware` to everyone but the administrator (403
+  `auth_forbidden`, also without a session). A `Disabled` verifier hands on the session `dev`/`admin`.
+- `webmod`: `Options.Members` makes the API's `verify` the member check (family apps such as a music player);
+  the default keeps the administrator-only check.
+
 ## v0.1.6 — 2026-11-16
 
 **Breaking**
